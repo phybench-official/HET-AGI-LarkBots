@@ -15,13 +15,14 @@ problem_solver_prompt_template = """
 {text_content}
 
 # 输出格式
-1.  **开场白**: 必须从以下任选一个作为开头（不要添加任何其他前缀）：
+1.  **开场白**: 请从以下**随机**选一个作为开头：
     * "哈哈，我做出来了！"
     * "搞定！这题不难嘛。"
     * "哼哼，难不倒我！"
     * "我想出来了！"
     * "唔... 略加思索，这题的解法应该是："
-2.  **解题过程**: (紧跟开场白) 用清晰的、一步一步的思路来讲解你是如何解开这道题的，就像在给同学讲题一样。
+    注意开头与解题过程间衔接自然，避免生硬。
+2.  **解题过程**: 用清晰的、一步一步的思路来讲解你是如何解开这道题的，就像在给同学讲题一样。
 3.  **最终答案**: 在过程的最后，明确给出你的最终答案，例如：“所以，答案就是 xxx。”
 """
 
@@ -45,7 +46,7 @@ def problem_solver_worker(
             prompt = problem_solver_prompt_template.format(
                 text_content = text_content,
             ),
-            model = "Gemini-2.5-Pro",
+            model = "gemini-2.5-pro",
         )
         
         reply_content = serialize_json({"text": response})
@@ -57,7 +58,7 @@ def problem_solver_worker(
             .message_id(message_id) \
             .request_body(request_body) \
             .build()
-
+        
         response = lark_client.im.v1.message.reply(request) # type: ignore
         
         if response.success():
