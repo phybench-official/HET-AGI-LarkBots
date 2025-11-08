@@ -44,15 +44,15 @@ class LarkBot:
         )
         
         self._image_placeholder = "<image>"
-        
-        
+    
+       
     def register_message_receive(
         self,
         handler: Callable[[P2ImMessageReceiveV1], None],
     )-> None:
         
         self._event_handler_builder.register_p2_im_message_receive_v1(handler)
-     
+    
     
     def start(
         self,
@@ -65,43 +65,6 @@ class LarkBot:
             event_handler = event_handler,
             log_level = lark.LogLevel.DEBUG
         ).start()
-    
-    
-    def reply_message(
-        self,
-        response: str,
-        message_id: Optional[str] = None,
-    )-> ReplyMessageResponse:
-        
-        reply_content = serialize_json({"text": response})
-        request_body_builder = ReplyMessageRequestBody.builder()
-        request_body_builder = request_body_builder.content(reply_content)
-        request_body_builder = request_body_builder.msg_type("text")
-        request_body = request_body_builder.build()
-        request_builder = ReplyMessageRequest.builder()
-        request_builder = request_builder.request_body(request_body)
-        if message_id: request_builder = request_builder.message_id(message_id)
-        request = request_builder.build()
-        assert self._lark_client.im
-        reply_message_result = self._lark_client.im.v1.message.reply(request)
-        return reply_message_result
-    
-    
-    def get_message_resource(
-        self,
-        message_id: str,
-        resource_key: str,
-        resource_type: Literal["image", "file"],
-    )-> Any:
-
-        request_builder = GetMessageResourceRequest.builder()
-        request_builder = request_builder.message_id(message_id)
-        request_builder = request_builder.file_key(resource_key)
-        request_builder = request_builder.type(resource_type)
-        request = request_builder.build()
-        assert self._lark_client.im
-        get_message_resource_result = self._lark_client.im.v1.message_resource.get(request)
-        return get_message_resource_result
     
     
     def parse_message(
@@ -133,7 +96,7 @@ class LarkBot:
         # simple message
         if message_content_dict_keys == set(["text"]):
             text = message_content_dict["text"]
-            parse_image_result = {
+            parse_message_result = {
                 "success": True,
                 "message_type": "simple_message",
                 "message_id": message_id,
@@ -142,23 +105,50 @@ class LarkBot:
                 "image_bytes_list": [],
                 "message_content_dict": message_content_dict,
             }
-            return parse_image_result
+            return parse_message_result
         # complex message
         elif message_content_dict_keys == set(["title", "content"]):
             text = ""
-            parse_image_result = {
+            image_keys = []
+            hyperlinks = []
+            content_lines = message_content_dict["content"]
+            for index, line_elements in enumerate(content_lines):
+                if index: text += "\n"
+                for line_element in line_elements:
+                    tag = line_element["tag"]
+                    # text element
+                    if tag == "text":
+                        text += line_element["text"]
+                    # image element
+                    elif tag == "img":
+                        text += self._image_placeholder
+                        image_key = line_element["image_key"]
+                        image_keys.append(image_key)
+                    # hyper link element
+                    elif tag == "a":
+                        text += line_element["text"]
+                        hyperlink = line_element["href"]
+                        hyperlinks.append(hyperlink)
+                    else:
+                        return {
+                            "success": False,
+                            "error": f"message line element 不合预期：tag 为 {tag}",
+                        }
+            parse_message_result = {
                 "success": True,
                 "message_type": "complex_message",
                 "message_id": message_id,
                 "chat_type": chat_type,
                 "text": text,
+                "image_keys": image_keys,
+                "hyperlinks": hyperlinks,
                 "message_content_dict": message_content_dict,
             }
-            return parse_image_result
+            return parse_message_result
         # single image
         elif message_content_dict_keys == set(["image_key"]):
             image_key = message_content_dict["image_key"]
-            parse_image_result = {
+            parse_message_result = {
                 "success": True,
                 "message_type": "single_image",
                 "message_id": message_id,
@@ -167,23 +157,60 @@ class LarkBot:
                 "text": "",
                 "message_content_dict": message_content_dict,
             }
-            return parse_image_result
+            return parse_message_result
         # single file
         elif message_content_dict_keys == set(["file_key", "file_name"]):
+            file_key = message_content_dict["file_key"]
             file_name = message_content_dict["file_name"]
-            parse_image_result = {
+            parse_message_result = {
                 "success": True,
                 "message_type": "single_file",
-                "file": "",
+                "file_key": file_key,
                 "file_name": file_name,
                 "message_id": message_id,
                 "chat_type": chat_type,
                 "message_content_dict": message_content_dict,
             }
-            return parse_image_result
+            return parse_message_result
         else:
-            raise NotImplementedError(
-                f"message_content 不合预期，包含字段：{', '.join(message_content_dict_keys)}"
-            )
+            return {
+                "success": False, 
+                "error": f"message_content 不合预期，包含字段：{', '.join(message_content_dict_keys)}"
+            }
+            
+            
+    def get_message_resource(
+        self,
+        message_id: str,
+        resource_key: str,
+        resource_type: Literal["image", "file"],
+    )-> Any:
 
-
+        request_builder = GetMessageResourceRequest.builder()
+        request_builder = request_builder.message_id(message_id)
+        request_builder = request_builder.file_key(resource_key)
+        request_builder = request_builder.type(resource_type)
+        request = request_builder.build()
+        assert self._lark_client.im
+        get_message_resource_result = self._lark_client.im.v1.message_resource.get(request)
+        return get_message_resource_result
+    
+    
+    def reply_message(
+        self,
+        response: str,
+        message_id: Optional[str] = None,
+    )-> ReplyMessageResponse:
+        
+        reply_content = serialize_json({"text": response})
+        request_body_builder = ReplyMessageRequestBody.builder()
+        request_body_builder = request_body_builder.content(reply_content)
+        request_body_builder = request_body_builder.msg_type("text")
+        request_body = request_body_builder.build()
+        request_builder = ReplyMessageRequest.builder()
+        request_builder = request_builder.request_body(request_body)
+        if message_id: request_builder = request_builder.message_id(message_id)
+        request = request_builder.build()
+        assert self._lark_client.im
+        reply_message_result = self._lark_client.im.v1.message.reply(request)
+        return reply_message_result
