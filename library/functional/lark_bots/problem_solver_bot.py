@@ -46,15 +46,17 @@ class ProblemSolverBot(LarkBot):
     
     def handle_message_receive(
         self,
-        data: P2ImMessageReceiveV1,
+        message: P2ImMessageReceiveV1,
     )-> None:
         
-        if data.event is None: return
-        if data.event.message is None: return
+        print(message)
+        
+        if message.event is None: return
+        if message.event.message is None: return
 
-        message_id = data.event.message.message_id
-        chat_type = data.event.message.chat_type
-        data_content = data.event.message.content
+        message_id = message.event.message.message_id
+        chat_type = message.event.message.chat_type
+        message_content = message.event.message.content
         if not isinstance(message_id, str):
             print(f"[Handler] 收到非字符串 message_id: {message_id}")
             return
@@ -64,13 +66,16 @@ class ProblemSolverBot(LarkBot):
         if chat_type != "group":
             print("[Handler] 忽略非群聊消息")
             return
-        if not isinstance(data_content, str):
-            print(f"[Handler] 收到非字符串 data_content: {data_content}")
+        if not isinstance(message_content, str):
+            print(f"[Handler] 收到非字符串 message_content: {message_content}")
             return
 
         try:
-            data_content_dict = deserialize_json(data_content)
-            text_content = data_content_dict.get("text", "").strip()
+            message_content_dict = deserialize_json(message_content)
+            print("message content dict 里的内容有：")
+            for key in message_content_dict:
+                print(f"{key}: {message_content_dict[key]}")
+            text_content = message_content_dict.get("text", "").strip()
         except Exception:
             print("[Handler] 忽略非纯文本消息")
             return

@@ -1,6 +1,6 @@
-from ..json_tools import *
-from .lark_sdk import *
 from ..typing import *
+from .lark_sdk import *
+from ..json_tools import *
 
 
 __all__ = [
@@ -43,15 +43,17 @@ class LarkBot:
             level = lark.LogLevel.DEBUG
         )
         
+        self._image_placeholder = "<image>"
+        
         
     def register_message_receive(
         self,
-        handler: Any,
+        handler: Callable[[P2ImMessageReceiveV1], None],
     )-> None:
         
         self._event_handler_builder.register_p2_im_message_receive_v1(handler)
-        
-        
+     
+    
     def start(
         self,
     )-> None:
@@ -69,18 +71,119 @@ class LarkBot:
         self,
         response: str,
         message_id: Optional[str] = None,
-    )-> Any:
+    )-> ReplyMessageResponse:
         
         reply_content = serialize_json({"text": response})
-        request_body: ReplyMessageRequestBody = ReplyMessageRequestBody.builder() \
-            .content(reply_content) \
-            .msg_type("text") \
-            .build()
+        request_body_builder = ReplyMessageRequestBody.builder()
+        request_body_builder = request_body_builder.content(reply_content)
+        request_body_builder = request_body_builder.msg_type("text")
+        request_body = request_body_builder.build()
         request_builder = ReplyMessageRequest.builder()
         request_builder = request_builder.request_body(request_body)
         if message_id: request_builder = request_builder.message_id(message_id)
         request = request_builder.build()
         assert self._lark_client.im
-        self._lark_client.im.v1.message.reply(request)
-        return request
+        reply_message_result = self._lark_client.im.v1.message.reply(request)
+        return reply_message_result
+    
+    
+    def get_message_resource(
+        self,
+        message_id: str,
+        resource_key: str,
+        resource_type: Literal["image", "file"],
+    )-> Any:
+
+        request_builder = GetMessageResourceRequest.builder()
+        request_builder = request_builder.message_id(message_id)
+        request_builder = request_builder.file_key(resource_key)
+        request_builder = request_builder.type(resource_type)
+        request = request_builder.build()
+        assert self._lark_client.im
+        get_message_resource_result = self._lark_client.im.v1.message_resource.get(request)
+        return get_message_resource_result
+    
+    
+    def parse_message(
+        self,
+        message: P2ImMessageReceiveV1,
+    )-> Dict[str, Any]:
+
+        if message.event is None: 
+            return {"success": False, "error": "event 字段为空"}
+        if message.event.message is None: 
+            return {"success": False, "error": "event.message 字段为空"}
+
+        message_id = message.event.message.message_id
+        chat_type = message.event.message.chat_type
+        message_content = message.event.message.content
+        if not isinstance(message_id, str):
+            return {"success": False, "error": f"收到非字符串 message_id: {message_id}"}
+        if not isinstance(chat_type, str):
+            return {"success": False, "error": f"收到非字符串 chat_type: {chat_type}"}
+        if not isinstance(message_content, str):
+            return {"success": False, "error": f"收到非字符串 message_content: {message_content}"}
+
+        try:
+            message_content_dict = deserialize_json(message_content)
+        except Exception:
+            return {"success": False, "error": "反序列化 message_content 失败"}
+
+        message_content_dict_keys = set(key for key in message_content_dict)
+        # simple message
+        if message_content_dict_keys == set(["text"]):
+            text = message_content_dict["text"]
+            parse_image_result = {
+                "success": True,
+                "message_type": "simple_message",
+                "message_id": message_id,
+                "chat_type": chat_type,
+                "text": text,
+                "image_bytes_list": [],
+                "message_content_dict": message_content_dict,
+            }
+            return parse_image_result
+        # complex message
+        elif message_content_dict_keys == set(["title", "content"]):
+            text = ""
+            parse_image_result = {
+                "success": True,
+                "message_type": "complex_message",
+                "message_id": message_id,
+                "chat_type": chat_type,
+                "text": text,
+                "message_content_dict": message_content_dict,
+            }
+            return parse_image_result
+        # single image
+        elif message_content_dict_keys == set(["image_key"]):
+            image_key = message_content_dict["image_key"]
+            parse_image_result = {
+                "success": True,
+                "message_type": "single_image",
+                "message_id": message_id,
+                "chat_type": chat_type,
+                "image_key": image_key,
+                "text": "",
+                "message_content_dict": message_content_dict,
+            }
+            return parse_image_result
+        # single file
+        elif message_content_dict_keys == set(["file_key", "file_name"]):
+            file_name = message_content_dict["file_name"]
+            parse_image_result = {
+                "success": True,
+                "message_type": "single_file",
+                "file": "",
+                "file_name": file_name,
+                "message_id": message_id,
+                "chat_type": chat_type,
+                "message_content_dict": message_content_dict,
+            }
+            return parse_image_result
+        else:
+            raise NotImplementedError(
+                f"message_content 不合预期，包含字段：{', '.join(message_content_dict_keys)}"
+            )
+
 

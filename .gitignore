@@ -1,4 +1,9 @@
 __pycache__
-secret.md
+.venv
+.DS_Store
+
 api_keys.json
 lark_api_keys.json
+
+test.py
+secret.md
