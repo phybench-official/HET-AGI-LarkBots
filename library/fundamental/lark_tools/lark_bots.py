@@ -43,7 +43,7 @@ class LarkBot:
             level = lark.LogLevel.DEBUG
         )
         
-        self._image_placeholder = "<image>"
+        self._image_placeholder = "<image_never_used_1145141919810abcdef>"
     
        
     def register_message_receive(
@@ -102,7 +102,7 @@ class LarkBot:
                 "message_id": message_id,
                 "chat_type": chat_type,
                 "text": text,
-                "image_bytes_list": [],
+                "image_keys": [],
                 "message_content_dict": message_content_dict,
             }
             return parse_message_result
@@ -153,8 +153,8 @@ class LarkBot:
                 "message_type": "single_image",
                 "message_id": message_id,
                 "chat_type": chat_type,
-                "image_key": image_key,
                 "text": "",
+                "image_keys": [image_key],
                 "message_content_dict": message_content_dict,
             }
             return parse_message_result
