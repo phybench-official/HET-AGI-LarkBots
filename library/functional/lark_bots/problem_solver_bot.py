@@ -55,7 +55,7 @@ class ProblemSolverBot(LarkBot):
             return
         
         message_id = parse_message_result["message_id"]
-            
+        
         message_type = parse_message_result["message_type"]
         target_message_types = [
             "simple_message",
