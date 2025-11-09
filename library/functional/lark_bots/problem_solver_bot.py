@@ -118,7 +118,7 @@ class ProblemSolverBot(LarkBot):
             prompt = problem_solver_prompt_template.format(
                 text = text,
             ),
-            model = "gemini-2.5-pro",
+            model = "Gemini-2.5-Pro",
             images = image_bytes_list,
             image_placeholder = self._image_placeholder,
             tools = [

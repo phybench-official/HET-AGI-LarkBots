@@ -4,7 +4,7 @@ import requests
 import traceback
 import threading
 import xml.etree.ElementTree as ET
-from typing import List, Dict
+from typing import List, Any
 
 
 __all__ = [
@@ -24,24 +24,30 @@ class WolframAPIManager:
                 f"Wolfram API 密钥文件未找到: {wolfram_api_keys_path}"
             )
         
+        app_id_list: List[str] = []
         with open(wolfram_api_keys_path, 'r', encoding='UTF-8') as f:
-            all_keys = json.load(f)
-          
-        app_id_dicts_list: List[Dict[str, str]] = all_keys.get("wolfram_alpha", [])
+            try:
+                data: Any = json.load(f)
+                if not isinstance(data, list):
+                    raise TypeError(
+                        f"密钥文件 {wolfram_api_keys_path} 的根 "
+                        f"应为 list (列表)，而不是 {type(data).__name__}。"
+                    )
+                app_id_list = data
+            except json.JSONDecodeError:
+                raise ValueError(f"无法解析 {wolfram_api_keys_path}，请检查 JSON 格式。")
         
-        if not app_id_dicts_list:
+        if not app_id_list:
             raise ValueError(
-                f"密钥文件 {wolfram_api_keys_path} 中 "
-                f"未找到 'wolfram_alpha' 键或其列表为空。"
+                f"密钥文件 {wolfram_api_keys_path} 为空列表。"
             )
 
-        self._app_id_list: List[str] = []
-        for i, app_id_dict in enumerate(app_id_dicts_list):
-            app_id = app_id_dict.get("app_id")
-            if not app_id:
+        self._app_id_list = []
+        for i, app_id in enumerate(app_id_list):
+            if not isinstance(app_id, str) or not app_id:
                 raise ValueError(
-                    f"在 {wolfram_api_keys_path} 的 'wolfram_alpha' "
-                    f"列表索引 {i} 处缺少 'app_id' 字段。"
+                    f"在 {wolfram_api_keys_path} 的 "
+                    f"列表索引 {i} 处的值不是一个有效的、非空的 app_id 字符串。"
                 )
             self._app_id_list.append(app_id)
 
