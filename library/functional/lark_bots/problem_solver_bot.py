@@ -65,15 +65,12 @@ class ProblemSolverBot(LarkBot):
             print(f"  -> [Handler] 跳过一条类型为 {message_type} 的消息")
             return
         
-        mentioned_me = parse_message_result["mentioned_me"]
-        if mentioned_me:
-            print("  -> [Handler] 有人 @ 了本机器人！")
-        
         text = parse_message_result["text"]
         image_keys = parse_message_result["image_keys"]
+        mentioned_me = parse_message_result["mentioned_me"]
 
         keywords = ["【题目】"]
-        if any(keyword in text for keyword in keywords):
+        if mentioned_me or any(keyword in text for keyword in keywords):
             print("  -> [Handler] 启动后台做题家线程")
             worker_thread = threading.Thread(
                 target = self._handle_message_receive_background,
@@ -82,8 +79,8 @@ class ProblemSolverBot(LarkBot):
             worker_thread.start()
         
         print("  -> [Handler] 函数执行完毕并返回")
-        
-        
+    
+    
     def _handle_message_receive_background(
         self,
         message_id: str,

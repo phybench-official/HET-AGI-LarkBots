@@ -111,7 +111,7 @@ class LarkBot:
         if message_content_dict_keys == set(["text"]):
             text = message_content_dict["text"]
             mention_map = {
-                mention.key: mention.name
+                mention.key: f"@{mention.name}"
                 for mention in mention_list
                 if mention.key is not None and mention.name is not None
             }
