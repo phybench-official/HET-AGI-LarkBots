@@ -1,4 +1,5 @@
 from ..typing import *
+from ..externals import *
 from .lark_sdk import *
 from ..json_tools import *
 
@@ -11,12 +12,13 @@ __all__ = [
 
 def get_lark_bot_token(
     lark_bot_name: str,
-)-> Tuple[str, str]:
+)-> Tuple[str, str, str]:
     
     app_token_dict = load_from_json("lark_api_keys.json")
     app_id = app_token_dict[lark_bot_name]["app_id"]
     app_secret = app_token_dict[lark_bot_name]["app_secret"]
-    return app_id, app_secret
+    open_id = app_token_dict[lark_bot_name]["open_id"]
+    return app_id, app_secret, open_id
 
 
 class LarkBot:
@@ -26,16 +28,17 @@ class LarkBot:
         lark_bot_name: str,
     )-> None:
         
-        app_id, app_secret = get_lark_bot_token(lark_bot_name)
+        app_id, app_secret, open_id = get_lark_bot_token(lark_bot_name)
         self._name = lark_bot_name
         self._app_id = app_id
         self._app_secret = app_secret
+        self._open_id = open_id
         
-        self._lark_client = lark.Client.builder() \
-            .app_id(app_id) \
-            .app_secret(app_secret) \
-            .log_level(lark.LogLevel.INFO) \
-            .build()
+        lark_client_builder = lark.Client.builder()
+        lark_client_builder = lark_client_builder.app_id(app_id)
+        lark_client_builder = lark_client_builder.app_secret(app_secret)
+        lark_client_builder = lark_client_builder.log_level(lark.LogLevel.INFO)
+        self._lark_client = lark_client_builder.build()
 
         self._event_handler_builder = lark.EventDispatcherHandler.builder(
             encrypt_key = "",
@@ -45,7 +48,7 @@ class LarkBot:
         
         self._image_placeholder = "<image_never_used_1145141919810abcdef>"
     
-       
+    
     def register_message_receive(
         self,
         handler: Callable[[P2ImMessageReceiveV1], None],
@@ -91,11 +94,30 @@ class LarkBot:
             message_content_dict = deserialize_json(message_content)
         except Exception:
             return {"success": False, "error": "反序列化 message_content 失败"}
+        
+        try:
+            mention_list = message_content = message.event.message.mentions
+            assert mention_list
+        except:
+            mention_list = []
+        mentioned_me = any(
+            mention.id.open_id == self._open_id
+            for mention in mention_list
+            if mention.id is not None
+        ) # Very pythonic.
 
         message_content_dict_keys = set(key for key in message_content_dict)
         # simple message
         if message_content_dict_keys == set(["text"]):
             text = message_content_dict["text"]
+            mention_map = {
+                mention.key: mention.name
+                for mention in mention_list
+                if mention.key is not None and mention.name is not None
+            }
+            sorted_keys: List[str] = sorted(mention_map.keys(), key=len, reverse=True)
+            pattern = re.compile("|".join(re.escape(k) for k in sorted_keys))
+            text = pattern.sub(lambda m: mention_map[m.group(0)], text)
             parse_message_result = {
                 "success": True,
                 "message_type": "simple_message",
@@ -103,6 +125,7 @@ class LarkBot:
                 "chat_type": chat_type,
                 "text": text,
                 "image_keys": [],
+                "mentioned_me": mentioned_me,
                 "message_content_dict": message_content_dict,
             }
             return parse_message_result
@@ -129,6 +152,9 @@ class LarkBot:
                         text += line_element["text"]
                         hyperlink = line_element["href"]
                         hyperlinks.append(hyperlink)
+                    # mention element
+                    elif tag == "at":
+                        text += "@" + line_element["user_name"]
                     else:
                         return {
                             "success": False,
@@ -142,6 +168,7 @@ class LarkBot:
                 "text": text,
                 "image_keys": image_keys,
                 "hyperlinks": hyperlinks,
+                "mentioned_me": mentioned_me,
                 "message_content_dict": message_content_dict,
             }
             return parse_message_result
@@ -155,6 +182,7 @@ class LarkBot:
                 "chat_type": chat_type,
                 "text": "",
                 "image_keys": [image_key],
+                "mentioned_me": mentioned_me,
                 "message_content_dict": message_content_dict,
             }
             return parse_message_result
@@ -169,6 +197,7 @@ class LarkBot:
                 "file_name": file_name,
                 "message_id": message_id,
                 "chat_type": chat_type,
+                "mentioned_me": mentioned_me,
                 "message_content_dict": message_content_dict,
             }
             return parse_message_result
@@ -177,8 +206,8 @@ class LarkBot:
                 "success": False, 
                 "error": f"message_content 不合预期，包含字段：{', '.join(message_content_dict_keys)}"
             }
-            
-            
+    
+      
     def get_message_resource(
         self,
         message_id: str,

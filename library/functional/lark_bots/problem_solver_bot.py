@@ -55,7 +55,6 @@ class ProblemSolverBot(LarkBot):
             return
         
         message_id = parse_message_result["message_id"]
-        
         message_type = parse_message_result["message_type"]
         target_message_types = [
             "simple_message",
@@ -65,6 +64,10 @@ class ProblemSolverBot(LarkBot):
         if message_type not in target_message_types:
             print(f"  -> [Handler] 跳过一条类型为 {message_type} 的消息")
             return
+        
+        mentioned_me = parse_message_result["mentioned_me"]
+        if mentioned_me:
+            print("  -> [Handler] 有人 @ 了本机器人！")
         
         text = parse_message_result["text"]
         image_keys = parse_message_result["image_keys"]

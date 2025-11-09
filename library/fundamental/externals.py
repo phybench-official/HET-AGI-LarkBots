@@ -1,4 +1,5 @@
 import io
+import re
 import json
 import time
 import traceback
@@ -10,6 +11,7 @@ from pywheels.task_runner import run_tasks_concurrently
 
 __all__ = [
     "io",
+    "re",
     "json",
     "time",
     "traceback",

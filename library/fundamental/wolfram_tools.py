@@ -95,8 +95,34 @@ class WolframAPIManager:
                 error_message = root.find('.//error/msg')
                 if error_message is not None and error_message.text:
                     return f"Wolfram Alpha API 错误: {error_message.text}"
-                else:
-                    return "Wolfram Alpha API 错误: 未知的 API 错误。"
+                did_you_means: List[str] = []
+                for mean in root.findall('.//didyoumeans/didyoumean'):
+                    val = mean.get('val')
+                    if val:
+                        did_you_means.append(f"'{val}'")
+                if did_you_means:
+                    suggestions = ", ".join(did_you_means)
+                    return (
+                        f"Wolfram Alpha API 错误: 查询失败 (success=false)，"
+                        f"API 未能理解查询。您是不是指: {suggestions}"
+                    )
+                tips: List[str] = []
+                for tip in root.findall('.//tips/tip'):
+                    text = tip.get('text')
+                    if text:
+                        tips.append(text)
+                if tips:
+                    tip_text = "; ".join(tips)
+                    return (
+                        f"Wolfram Alpha API 错误: 查询失败 (success=false)，"
+                        f"API 提供了以下提示: {tip_text}"
+                    )
+                raw_response_text = response.text
+                return (
+                    f"Wolfram Alpha API 错误: 未知错误 (success=false)，"
+                    f"且未提供 error.msg、didyoumeans 或 tips。"
+                    f"原始响应: {raw_response_text}"
+                )
             
             else:
                 result_text: List[str] = []
@@ -106,9 +132,8 @@ class WolframAPIManager:
                         plaintext = subpod.find('plaintext')
                         if plaintext is not None and plaintext.text:
                             result_text.append(f"{title}: {plaintext.text.strip()}")
-                
                 if not result_text:
-                    return "Wolfram Alpha 未找到有效结果。"
+                    return "Wolfram Alpha 未找到有效的文本结果 (可能返回了图片或无法解析的格式)。"
                 else:
                     return "\n".join(result_text)
         
