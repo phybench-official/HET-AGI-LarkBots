@@ -121,6 +121,11 @@ class ProblemSolverBot(LarkBot):
             model = "gemini-2.5-pro",
             images = image_bytes_list,
             image_placeholder = self._image_placeholder,
+            tools = [
+                python_tool(timeout=30, verbose=True),
+                wolfram_tool(timeout=60, verbose=True),
+            ],
+            tool_use_trial_num = 10,
         )
         
         reply_message_result = self.reply_message(

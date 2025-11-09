@@ -4,6 +4,7 @@ __pycache__
 
 api_keys.json
 lark_api_keys.json
+wolfram_api_keys.json
 
 test.py
-secret.md
+document
