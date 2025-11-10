@@ -119,7 +119,7 @@ class ProblemSolverBot(ParallelThreadLarkBot):
             response = await asyncio.to_thread(
                 get_answer,
                 prompt = prompt,
-                model = "Gemini-2.5-Flash",
+                model = "Qwen-VL-Max",
                 images = image_bytes_list,
                 image_placeholder = self._image_placeholder,
                 tools = [
