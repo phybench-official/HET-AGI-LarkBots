@@ -109,7 +109,7 @@ class ParallelThreadLarkBot(LarkBot):
                 try:
                     parsed_message: Dict[str, Any] = await asyncio.wait_for(
                         queue.get(), 
-                        timeout=self._worker_timeout
+                        timeout = self._worker_timeout,
                     )
 
                     if current_state is None:

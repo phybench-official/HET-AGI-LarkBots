@@ -50,23 +50,13 @@ class ProblemSolverBot(ParallelThreadLarkBot):
         self,
         parsed_message: Dict[str, Any],
     )-> bool:
-        
-        message_type = parsed_message.get("message_type")
-        target_message_types = [
-            "simple_message",
-            "complex_message",
-            "single_image",
-        ]
-        if message_type not in target_message_types:
-            print(f"  -> [Filter] 跳过一条类型为 {message_type} 的消息")
-            return False
-        
+
         text: str = parsed_message.get("text", "")
         mentioned_me: bool = parsed_message.get("mentioned_me", False)
 
         keywords = ["【题目】"]
         if mentioned_me or any(keyword in text for keyword in keywords):
-            print(f"  -> [Filter] 消息命中，转交给 Worker")
+            print(f" -> [Filter] 消息命中，转交给 Worker")
             return True
         
         return False
@@ -87,37 +77,35 @@ class ProblemSolverBot(ParallelThreadLarkBot):
     )-> Dict[str, Any]:
         
         message_id: str = parsed_message["message_id"]
-        text: str = parsed_message["text"]
-        image_keys: List[str] = parsed_message["image_keys"]
-        
-        print(f"  -> [Worker] 收到任务: {text}，开始处理")
-        
-        image_bytes_list: List[bytes] = []
-        if image_keys:
-            download_tasks = []
-            for image_key in image_keys:
-                task = asyncio.to_thread(
-                    self.get_message_resource,
-                    message_id, 
-                    image_key, 
-                    "image"
-                )
-                download_tasks.append(task)
-
-            download_image_results = await asyncio.gather(*download_tasks, return_exceptions=True)
-            
-            for result in download_image_results:
-                if isinstance(result, BaseException):
-                    print(f"  -> [Worker] 下载图片资源时报错：{result}\n调用栈：\n{traceback.format_exc()}")
-                elif not result.success():
-                    print(f"  -> [Worker] 下载图片资源失败: {result.code}, {result.msg}")
-                else:
-                    image_bytes_list.append(result.file.read())
+        response: str = ""
         
         try:
+            text: str = parsed_message["text"]
+            image_keys: List[str] = parsed_message["image_keys"]
+            
+            print(f" -> [Worker] 收到任务: {text}，开始处理")
+            
+            image_bytes_list: List[bytes] = []
+            if image_keys:
+                task_inputs: List[Tuple[Any, ...]] = [
+                    (message_id, image_key, "image") 
+                    for image_key in image_keys
+                ]
+                results_dict = await run_tasks_concurrently_async(
+                    task = self.get_message_resource_async,
+                    task_indexers = image_keys,
+                    task_inputs = task_inputs,
+                    show_progress_bar = False,
+                )
+                for image_key in image_keys:
+                    result = results_dict[image_key]
+                    if not result.success():
+                        raise RuntimeError(
+                            f"下载图片资源 {image_key} 失败: {result.code}, {result.msg}"
+                        )
+                    image_bytes_list.append(result.file.read())
             prompt = problem_solver_prompt_template.format(text=text)
-            response = await asyncio.to_thread(
-                get_answer,
+            response = await get_answer_async(
                 prompt = prompt,
                 model = "Qwen-VL-Max",
                 images = image_bytes_list,
@@ -128,24 +116,23 @@ class ProblemSolverBot(ParallelThreadLarkBot):
                 ],
                 tool_use_trial_num = 10,
             )
-        except Exception as e:
-            print(f"  -> [Worker] LLM (get_answer) 执行失败: {e}\n调用栈：\n{traceback.format_exc()}")
-            response = f"哎呀，我好像算错了... 出了个小 bug: {e}"
 
-        reply_message_result = await asyncio.to_thread(
-            self.reply_message,
+        except Exception as error:
+            print(f" -> [Worker] 任务执行失败: {error}\n调用栈：\n{traceback.format_exc()}")
+            response = f"哎呀，我好像算错了... 出了个小 bug: {error}"
+        
+        reply_message_result = await self.reply_message_async(
             response = response,
             message_id = message_id,
             reply_in_thread = True,
         )
 
         if reply_message_result.success():
-            print("  -> [Worker] 已发送最终答案")
+            print(" -> [Worker] 已发送最终答案")
         else:
             print(
-                "  -> [Worker] 最终答案发送失败: "
+                " -> [Worker] 最终答案发送失败: "
                 f"{reply_message_result.code}, {reply_message_result.msg}"
             )
         
         return context
-

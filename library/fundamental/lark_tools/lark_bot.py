@@ -101,18 +101,17 @@ class LarkBot:
             return {"success": False, "error": "反序列化 message_content 失败"}
         
         try:
-            mention_list = message_content = message.event.message.mentions
+            mention_list = message.event.message.mentions
             assert mention_list
         except:
-            mention_list = []
+            mention_list = [] 
         mentioned_me = any(
             mention.id.open_id == self._open_id
             for mention in mention_list
             if mention.id is not None
-        ) # Very pythonic.
+        )
 
         message_content_dict_keys = set(key for key in message_content_dict)
-        # simple message
         if message_content_dict_keys == set(["text"]):
             text = message_content_dict["text"]
             mention_map = {
@@ -137,7 +136,7 @@ class LarkBot:
                 "message_content_dict": message_content_dict,
             }
             return parse_message_result
-        # complex message
+        
         elif message_content_dict_keys == set(["title", "content"]):
             text = ""
             image_keys = []
@@ -147,20 +146,16 @@ class LarkBot:
                 if index: text += "\n"
                 for line_element in line_elements:
                     tag = line_element["tag"]
-                    # text element
                     if tag == "text":
                         text += line_element["text"]
-                    # image element
                     elif tag == "img":
                         text += self._image_placeholder
                         image_key = line_element["image_key"]
                         image_keys.append(image_key)
-                    # hyper link element
                     elif tag == "a":
                         text += line_element["text"]
                         hyperlink = line_element["href"]
                         hyperlinks.append(hyperlink)
-                    # mention element
                     elif tag == "at":
                         text += "@" + line_element["user_name"]
                     else:
@@ -177,12 +172,12 @@ class LarkBot:
                 "chat_type": chat_type,
                 "text": text,
                 "image_keys": image_keys,
-                "hyperlinks": hyperlinks,
                 "mentioned_me": mentioned_me,
                 "message_content_dict": message_content_dict,
+                "hyperlinks": hyperlinks,
             }
             return parse_message_result
-        # single image
+        
         elif message_content_dict_keys == set(["image_key"]):
             image_key = message_content_dict["image_key"]
             parse_message_result = {
@@ -198,7 +193,7 @@ class LarkBot:
                 "message_content_dict": message_content_dict,
             }
             return parse_message_result
-        # single file
+        
         elif message_content_dict_keys == set(["file_key", "file_name"]):
             file_key = message_content_dict["file_key"]
             file_name = message_content_dict["file_name"]
@@ -208,20 +203,23 @@ class LarkBot:
                 "message_id": message_id,
                 "thread_root_id": thread_root_id,
                 "is_thread_root": is_thread_root,
-                "file_key": file_key,
-                "file_name": file_name,
                 "chat_type": chat_type,
+                "text": "",
+                "image_keys": [],
                 "mentioned_me": mentioned_me,
                 "message_content_dict": message_content_dict,
+                "file_key": file_key,
+                "file_name": file_name,
             }
             return parse_message_result
+        
         else:
             return {
                 "success": False, 
                 "error": f"message_content 不合预期，包含字段：{', '.join(message_content_dict_keys)}"
             }
     
-      
+    
     def get_message_resource(
         self,
         message_id: str,
@@ -239,14 +237,27 @@ class LarkBot:
         return get_message_resource_result
     
     
+    async def get_message_resource_async(
+        self,
+        message_id: str,
+        resource_key: str,
+        resource_type: Literal["image", "file"],
+    )-> Any:
+        
+        request_builder = GetMessageResourceRequest.builder()
+        request_builder = request_builder.message_id(message_id)
+        request_builder = request_builder.file_key(resource_key)
+        request_builder = request_builder.type(resource_type)
+        request = request_builder.build()
+        assert self._lark_client.im
+        get_message_resource_result = await self._lark_client.im.v1.message_resource.aget(request)
+        return get_message_resource_result
+    
+    
     def reply_message(
         self,
         response: str,
         message_id: str,
-        # reply_in_thread 的逻辑似乎是：
-        # 如果为 True，则一定在话题里回复（没有话题也会自动建一个新的话题）
-        # 如果为 False，如果消息下没有话题，就在群聊里回复，援引消息
-        # 即使为 False，如果消息下已有话题，就在话题里回复
         reply_in_thread: bool = False,
     )-> ReplyMessageResponse:
         
@@ -265,13 +276,33 @@ class LarkBot:
         return reply_message_result
     
     
-    # TODO: 这有啥用？
+    async def reply_message_async(
+        self,
+        response: str,
+        message_id: str,
+        reply_in_thread: bool = False,
+    )-> ReplyMessageResponse:
+        
+        reply_content = serialize_json({"text": response})
+        request_body_builder = ReplyMessageRequestBody.builder()
+        request_body_builder = request_body_builder.content(reply_content)
+        request_body_builder = request_body_builder.msg_type("text")
+        request_body_builder = request_body_builder.reply_in_thread(reply_in_thread)
+        request_body = request_body_builder.build()
+        request_builder = ReplyMessageRequest.builder()
+        request_builder = request_builder.request_body(request_body)
+        request_builder = request_builder.message_id(message_id)
+        request = request_builder.build()
+        assert self._lark_client.im
+        reply_message_result = await self._lark_client.im.v1.message.areply(request)
+        return reply_message_result
+    
+    
     def send_message(
         self,
         receive_id_type: Literal["chat_id", "open_id", "user_id"],
         receive_id: str,
         content: str,
-        msg_type: str = "text",
     )-> CreateMessageResponse:
         
         message_content = serialize_json({"text": content})
@@ -279,7 +310,7 @@ class LarkBot:
         request_body_builder = CreateMessageRequestBody.builder()
         request_body_builder = request_body_builder.receive_id(receive_id)
         request_body_builder = request_body_builder.content(message_content)
-        request_body_builder = request_body_builder.msg_type(msg_type)
+        request_body_builder = request_body_builder.msg_type("text")
         request_body = request_body_builder.build()
         
         request_builder = CreateMessageRequest.builder()
@@ -289,4 +320,29 @@ class LarkBot:
         
         assert self._lark_client.im
         create_message_result = self._lark_client.im.v1.message.create(request)
+        return create_message_result
+
+
+    async def send_message_async(
+        self,
+        receive_id_type: Literal["chat_id", "open_id", "user_id"],
+        receive_id: str,
+        content: str,
+    )-> CreateMessageResponse:
+
+        message_content = serialize_json({"text": content})
+        
+        request_body_builder = CreateMessageRequestBody.builder()
+        request_body_builder = request_body_builder.receive_id(receive_id)
+        request_body_builder = request_body_builder.content(message_content)
+        request_body_builder = request_body_builder.msg_type("text")
+        request_body = request_body_builder.build()
+        
+        request_builder = CreateMessageRequest.builder()
+        request_builder = request_builder.receive_id_type(receive_id_type)
+        request_builder = request_builder.request_body(request_body)
+        request = request_builder.build()
+        
+        assert self._lark_client.im
+        create_message_result = await self._lark_client.im.v1.message.acreate(request)
         return create_message_result
