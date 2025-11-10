@@ -6,6 +6,7 @@ import asyncio
 import traceback
 import threading
 import contextlib
+from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 from collections import OrderedDict
 from pywheels.llm_tools import get_answer
@@ -17,6 +18,7 @@ __all__ = [
     "re",
     "json",
     "time",
+    "deepcopy",
     "asyncio",
     "traceback",
     "threading",
