@@ -5,6 +5,7 @@ from typing import Tuple
 from typing import Literal
 from typing import Callable
 from typing import Optional
+from typing import Awaitable
 
 
 __all__ = [
@@ -15,4 +16,5 @@ __all__ = [
     "Literal",
     "Callable",
     "Optional",
+    "Awaitable",
 ]

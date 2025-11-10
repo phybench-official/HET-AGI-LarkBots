@@ -115,9 +115,10 @@ class LarkBot:
                 for mention in mention_list
                 if mention.key is not None and mention.name is not None
             }
-            sorted_keys: List[str] = sorted(mention_map.keys(), key=len, reverse=True)
-            pattern = re.compile("|".join(re.escape(k) for k in sorted_keys))
-            text = pattern.sub(lambda m: mention_map[m.group(0)], text)
+            if mention_map:
+                sorted_keys: List[str] = sorted(mention_map.keys(), key=len, reverse=True)
+                pattern = re.compile("|".join(re.escape(k) for k in sorted_keys))
+                text = pattern.sub(lambda m: mention_map[m.group(0)], text)
             parse_message_result = {
                 "success": True,
                 "message_type": "simple_message",
@@ -228,18 +229,51 @@ class LarkBot:
     def reply_message(
         self,
         response: str,
-        message_id: Optional[str] = None,
+        message_id: str,
+        # reply_in_thread 的逻辑似乎是：
+        # 如果为 True，则一定在话题里回复（没有话题也会自动建一个新的话题）
+        # 如果为 False，如果消息下没有话题，就在群聊里回复，援引消息
+        # 即使为 False，如果消息下已有话题，就在话题里回复
+        reply_in_thread: bool = False,
     )-> ReplyMessageResponse:
         
         reply_content = serialize_json({"text": response})
         request_body_builder = ReplyMessageRequestBody.builder()
         request_body_builder = request_body_builder.content(reply_content)
         request_body_builder = request_body_builder.msg_type("text")
+        request_body_builder = request_body_builder.reply_in_thread(reply_in_thread)
         request_body = request_body_builder.build()
         request_builder = ReplyMessageRequest.builder()
         request_builder = request_builder.request_body(request_body)
-        if message_id: request_builder = request_builder.message_id(message_id)
+        request_builder = request_builder.message_id(message_id)
         request = request_builder.build()
         assert self._lark_client.im
         reply_message_result = self._lark_client.im.v1.message.reply(request)
         return reply_message_result
+    
+    
+    # TODO: 这有啥用？
+    def send_message(
+        self,
+        receive_id_type: Literal["chat_id", "open_id", "user_id"],
+        receive_id: str,
+        content: str,
+        msg_type: str = "text",
+    )-> CreateMessageResponse:
+        
+        message_content = serialize_json({"text": content})
+        
+        request_body_builder = CreateMessageRequestBody.builder()
+        request_body_builder = request_body_builder.receive_id(receive_id)
+        request_body_builder = request_body_builder.content(message_content)
+        request_body_builder = request_body_builder.msg_type(msg_type)
+        request_body = request_body_builder.build()
+        
+        request_builder = CreateMessageRequest.builder()
+        request_builder = request_builder.receive_id_type(receive_id_type)
+        request_builder = request_builder.request_body(request_body)
+        request = request_builder.build()
+        
+        assert self._lark_client.im
+        create_message_result = self._lark_client.im.v1.message.create(request)
+        return create_message_result

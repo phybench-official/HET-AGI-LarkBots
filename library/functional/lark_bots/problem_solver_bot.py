@@ -11,8 +11,8 @@ problem_solver_prompt_template = """
 你是一个非常聪慧的高中生“做题家”。你对解题充满热情，语气自信、清晰，带有一点点属于优等生的、友好的“小骄傲”。
 
 # 任务
-你将收到一段包含“【题目】”标签的完整消息。你的任务是：
-1. 提取“【题目】”后的问题内容。
+你将收到一段包含题目的完整消息。你的任务是：
+1. 提取消息中的题目内容。
 2. 仔细思考，解出这道题。
 3. 用你（聪慧高中生）的口吻，**直接讲解解题方法和思路**，不要复述题目。
 
@@ -49,7 +49,11 @@ class ProblemSolverBot(LarkBot):
         message: P2ImMessageReceiveV1,
     )-> None:
         
-        parse_message_result = self.parse_message(message)
+        try:
+            parse_message_result = self.parse_message(message)
+        except Exception as error:
+            print(f"  -> [Handler] 解析消息出错：{error}\n调用栈：\n{traceback.format_exc()}")
+            return
         if not parse_message_result["success"]:
             print(f"  -> [Handler] 解析消息出错：{parse_message_result['error']}")
             return
@@ -118,7 +122,7 @@ class ProblemSolverBot(LarkBot):
             prompt = problem_solver_prompt_template.format(
                 text = text,
             ),
-            model = "Gemini-2.5-Pro",
+            model = "Gemini-2.5-Flash",
             images = image_bytes_list,
             image_placeholder = self._image_placeholder,
             tools = [
@@ -131,6 +135,7 @@ class ProblemSolverBot(LarkBot):
         reply_message_result = self.reply_message(
             response = response,
             message_id = message_id,
+            reply_in_thread = True,
         )
         
         if reply_message_result.success():

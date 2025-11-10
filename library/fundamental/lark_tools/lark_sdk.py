@@ -5,6 +5,9 @@ from lark_oapi.api.im.v1 import ReplyMessageResponse
 from lark_oapi.api.im.v1 import ReplyMessageRequestBody
 from lark_oapi.api.im.v1 import GetMessageResourceRequest
 from lark_oapi.api.im.v1 import GetMessageResourceResponse
+from lark_oapi.api.im.v1 import CreateMessageRequest
+from lark_oapi.api.im.v1 import CreateMessageResponse
+from lark_oapi.api.im.v1 import CreateMessageRequestBody
 
 
 __all__ = [
@@ -15,4 +18,7 @@ __all__ = [
     "ReplyMessageRequestBody",
     "GetMessageResourceRequest",
     "GetMessageResourceResponse",
+    "CreateMessageRequest",
+    "CreateMessageResponse",
+    "CreateMessageRequestBody",
 ]
