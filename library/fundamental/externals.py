@@ -2,9 +2,11 @@ import io
 import re
 import json
 import time
+import asyncio
 import traceback
 import threading
 import contextlib
+from collections import OrderedDict
 from pywheels.llm_tools import get_answer
 from pywheels.task_runner import run_tasks_concurrently
 
@@ -14,9 +16,11 @@ __all__ = [
     "re",
     "json",
     "time",
+    "asyncio",
     "traceback",
     "threading",
     "get_answer",
     "contextlib",
+    "OrderedDict",
     "run_tasks_concurrently",
 ]
