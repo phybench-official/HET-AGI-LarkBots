@@ -16,6 +16,7 @@ class ParallelThreadLarkBot(LarkBot):
         lark_bot_name: str,
         worker_timeout: float = 600.0,
         context_cache_size: int = 1024,
+        max_workers: Optional[int] = None,
     )-> None:
 
         super().__init__(lark_bot_name)
@@ -32,6 +33,8 @@ class ParallelThreadLarkBot(LarkBot):
         self._context_cache_size: int = context_cache_size
         self._context_cache: OrderedDict[str, Dict[str, Any]] = OrderedDict()
         self._cache_lock: Optional[asyncio.Lock] = None
+        
+        self._max_workers: Optional[int] = max_workers
         
         self._event_handler_builder.register_p2_im_message_receive_v1(
             self._sync_bridge_callback
@@ -151,6 +154,10 @@ class ParallelThreadLarkBot(LarkBot):
     )-> None:
         
         asyncio.set_event_loop(loop)
+        if self._max_workers is not None:
+            custom_executor = ThreadPoolExecutor(max_workers=self._max_workers)
+            loop.set_default_executor(custom_executor)
+            print(f"[ParallelThreadLarkBot] Custom thread pool size set to {self._max_workers}")
         
         self._manager_lock = asyncio.Lock()
         self._cache_lock = asyncio.Lock()
@@ -177,7 +184,8 @@ class ParallelThreadLarkBot(LarkBot):
         print(f"[ParallelThreadLarkBot] Starting synchronous Lark WS client on MainThread...")
         super().start()
     
-    
+    # ------------------ 业务逻辑钩子 ------------------
+
     def should_process(
         self,
         parsed_message: Dict[str, Any],

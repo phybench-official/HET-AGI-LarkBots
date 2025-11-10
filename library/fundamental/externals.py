@@ -6,6 +6,7 @@ import asyncio
 import traceback
 import threading
 import contextlib
+from concurrent.futures import ThreadPoolExecutor
 from collections import OrderedDict
 from pywheels.llm_tools import get_answer
 from pywheels.task_runner import run_tasks_concurrently
@@ -22,5 +23,6 @@ __all__ = [
     "get_answer",
     "contextlib",
     "OrderedDict",
+    "ThreadPoolExecutor",
     "run_tasks_concurrently",
 ]
