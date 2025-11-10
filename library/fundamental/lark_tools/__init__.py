@@ -1,2 +1,2 @@
 from .lark_sdk import *
-from .lark_bots import *
+from .basic_lark_bots import *

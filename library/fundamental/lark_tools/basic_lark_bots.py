@@ -83,13 +83,18 @@ class LarkBot:
         message_id = message.event.message.message_id
         chat_type = message.event.message.chat_type
         message_content = message.event.message.content
+        thread_root_id = message.event.message.root_id
+        is_thread_root = False
         if not isinstance(message_id, str):
             return {"success": False, "error": f"收到非字符串 message_id: {message_id}"}
         if not isinstance(chat_type, str):
             return {"success": False, "error": f"收到非字符串 chat_type: {chat_type}"}
         if not isinstance(message_content, str):
             return {"success": False, "error": f"收到非字符串 message_content: {message_content}"}
-
+        if not thread_root_id:
+            thread_root_id = message_id
+            is_thread_root = True
+        
         try:
             message_content_dict = deserialize_json(message_content)
         except Exception:
@@ -123,6 +128,8 @@ class LarkBot:
                 "success": True,
                 "message_type": "simple_message",
                 "message_id": message_id,
+                "thread_root_id": thread_root_id,
+                "is_thread_root": is_thread_root,
                 "chat_type": chat_type,
                 "text": text,
                 "image_keys": [],
@@ -165,6 +172,8 @@ class LarkBot:
                 "success": True,
                 "message_type": "complex_message",
                 "message_id": message_id,
+                "thread_root_id": thread_root_id,
+                "is_thread_root": is_thread_root,
                 "chat_type": chat_type,
                 "text": text,
                 "image_keys": image_keys,
@@ -180,6 +189,8 @@ class LarkBot:
                 "success": True,
                 "message_type": "single_image",
                 "message_id": message_id,
+                "thread_root_id": thread_root_id,
+                "is_thread_root": is_thread_root,
                 "chat_type": chat_type,
                 "text": "",
                 "image_keys": [image_key],
@@ -194,9 +205,11 @@ class LarkBot:
             parse_message_result = {
                 "success": True,
                 "message_type": "single_file",
+                "message_id": message_id,
+                "thread_root_id": thread_root_id,
+                "is_thread_root": is_thread_root,
                 "file_key": file_key,
                 "file_name": file_name,
-                "message_id": message_id,
                 "chat_type": chat_type,
                 "mentioned_me": mentioned_me,
                 "message_content_dict": message_content_dict,
