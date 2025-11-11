@@ -85,25 +85,10 @@ class ProblemSolverBot(ParallelThreadLarkBot):
             
             print(f" -> [Worker] 收到任务: {text}，开始处理")
             
-            image_bytes_list: List[bytes] = []
-            if image_keys:
-                task_inputs: List[Tuple[Any, ...]] = [
-                    (message_id, image_key, "image") 
-                    for image_key in image_keys
-                ]
-                results_dict = await run_tasks_concurrently_async(
-                    task = self.get_message_resource_async,
-                    task_indexers = image_keys,
-                    task_inputs = task_inputs,
-                    show_progress_bar = False,
-                )
-                for image_key in image_keys:
-                    result = results_dict[image_key]
-                    if not result.success():
-                        raise RuntimeError(
-                            f"下载图片资源 {image_key} 失败: {result.code}, {result.msg}"
-                        )
-                    image_bytes_list.append(result.file.read())
+            image_bytes_list = await self.download_message_images(
+                message_id = message_id,
+                image_keys = image_keys,
+            )
             prompt = problem_solver_prompt_template.format(text=text)
             response = await get_answer_async(
                 prompt = prompt,
@@ -116,7 +101,7 @@ class ProblemSolverBot(ParallelThreadLarkBot):
                 ],
                 tool_use_trial_num = 10,
             )
-
+        
         except Exception as error:
             print(f" -> [Worker] 任务执行失败: {error}\n调用栈：\n{traceback.format_exc()}")
             response = f"哎呀，我好像算错了... 出了个小 bug: {error}"

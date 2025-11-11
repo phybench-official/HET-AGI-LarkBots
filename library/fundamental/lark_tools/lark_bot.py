@@ -2,6 +2,7 @@ from ..typing import *
 from ..externals import *
 from .lark_sdk import *
 from ..json_tools import *
+from ..backoff_decorators import *
 
 
 __all__ = [
@@ -19,6 +20,9 @@ def get_lark_bot_token(
     app_secret = app_token_dict[lark_bot_name]["app_secret"]
     open_id = app_token_dict[lark_bot_name]["open_id"]
     return app_id, app_secret, open_id
+
+
+_create_document_backoff_seconds = [1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0, 32.0]
 
 
 class LarkBot:
@@ -83,17 +87,23 @@ class LarkBot:
         message_id = message.event.message.message_id
         chat_type = message.event.message.chat_type
         message_content = message.event.message.content
-        thread_root_id = message.event.message.root_id
-        is_thread_root = False
         if not isinstance(message_id, str):
             return {"success": False, "error": f"收到非字符串 message_id: {message_id}"}
         if not isinstance(chat_type, str):
             return {"success": False, "error": f"收到非字符串 chat_type: {chat_type}"}
         if not isinstance(message_content, str):
             return {"success": False, "error": f"收到非字符串 message_content: {message_content}"}
-        if not thread_root_id:
-            thread_root_id = message_id
-            is_thread_root = True
+        
+        if chat_type == "group":
+            if message.event.message.root_id:
+                thread_root_id = message.event.message.root_id
+                is_thread_root = False
+            else:
+                thread_root_id = message_id
+                is_thread_root = True
+        else:
+            thread_root_id = None
+            is_thread_root = False
         
         try:
             message_content_dict = deserialize_json(message_content)
@@ -236,7 +246,6 @@ class LarkBot:
         get_message_resource_result = self._lark_client.im.v1.message_resource.get(request)
         return get_message_resource_result
     
-    
     async def get_message_resource_async(
         self,
         message_id: str,
@@ -252,6 +261,34 @@ class LarkBot:
         assert self._lark_client.im
         get_message_resource_result = await self._lark_client.im.v1.message_resource.aget(request)
         return get_message_resource_result
+    
+    
+    async def download_message_images(
+        self,
+        message_id: str,
+        image_keys: List[str],
+    )-> List[bytes]:
+        
+        image_bytes_list: List[bytes] = []
+        if image_keys:
+            task_inputs: List[Tuple[Any, ...]] = [
+                (message_id, image_key, "image") 
+                for image_key in image_keys
+            ]
+            results_dict = await run_tasks_concurrently_async(
+                task = self.get_message_resource_async,
+                task_indexers = image_keys,
+                task_inputs = task_inputs,
+                show_progress_bar = False,
+            )
+            for image_key in image_keys:
+                result = results_dict[image_key]
+                if not result.success():
+                    raise RuntimeError(
+                        f"下载图片资源 {image_key} 失败: {result.code}, {result.msg}"
+                    )
+                image_bytes_list.append(result.file.read())
+        return image_bytes_list
     
     
     def reply_message(
@@ -274,7 +311,6 @@ class LarkBot:
         assert self._lark_client.im
         reply_message_result = self._lark_client.im.v1.message.reply(request)
         return reply_message_result
-    
     
     async def reply_message_async(
         self,
@@ -322,7 +358,6 @@ class LarkBot:
         create_message_result = self._lark_client.im.v1.message.create(request)
         return create_message_result
 
-
     async def send_message_async(
         self,
         receive_id_type: Literal["chat_id", "open_id", "user_id"],
@@ -346,3 +381,62 @@ class LarkBot:
         assert self._lark_client.im
         create_message_result = await self._lark_client.im.v1.message.acreate(request)
         return create_message_result
+    
+
+    # https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/create?appId=cli_a98f4b47a778100c
+    @backoff(_create_document_backoff_seconds)
+    def create_document(
+        self,
+        title: str,
+        folder_token: str,
+    )-> Dict[str, Any]:
+        
+        request_body_builder = CreateDocumentRequestBody.builder()
+        request_body_builder = request_body_builder.title(title)
+        request_body_builder = request_body_builder.folder_token(folder_token)
+        request_body = request_body_builder.build()
+        
+        request_builder = CreateDocumentRequest.builder()
+        request_builder = request_builder.request_body(request_body)
+        request = request_builder.build()
+        
+        assert self._lark_client.docx
+        create_document_result = self._lark_client.docx.v1.document.create(request)
+        result: Dict[str, Any] = {
+            "success": create_document_result.success(),
+        }
+        if result["success"]:
+            assert create_document_result.data
+            document = create_document_result.data.document
+            assert document
+            result["document_id"] = document.document_id
+        return result
+    
+    @backoff_async(_create_document_backoff_seconds)
+    async def create_document_async(
+        self,
+        title: str,
+        folder_token: str,
+    )-> Dict[str, Any]:
+        
+        request_body_builder = CreateDocumentRequestBody.builder()
+        request_body_builder = request_body_builder.title(title)
+        request_body_builder = request_body_builder.folder_token(folder_token)
+        request_body = request_body_builder.build()
+        
+        request_builder = CreateDocumentRequest.builder()
+        request_builder = request_builder.request_body(request_body)
+        request = request_builder.build()
+        
+        assert self._lark_client.docx
+        create_document_result = await self._lark_client.docx.v1.document.acreate(request)
+        result: Dict[str, Any] = {
+            "success": create_document_result.success(),
+        }
+        if result["success"]:
+            assert create_document_result.data
+            document = create_document_result.data.document
+            assert document
+            result["document_id"] = document.document_id
+        return result
+    

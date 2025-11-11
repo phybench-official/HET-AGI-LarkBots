@@ -2,11 +2,15 @@ import io
 import re
 import json
 import time
+import logging
 import asyncio
 import traceback
 import threading
 import contextlib
+from time import sleep
 from copy import deepcopy
+from functools import wraps
+from random import normalvariate
 from concurrent.futures import ThreadPoolExecutor
 from collections import OrderedDict
 from pywheels.llm_tools.get_answer import get_answer
@@ -20,6 +24,9 @@ __all__ = [
     "re",
     "json",
     "time",
+    "wraps",
+    "sleep",
+    "logging",
     "deepcopy",
     "asyncio",
     "traceback",
@@ -28,6 +35,7 @@ __all__ = [
     "get_answer_async",
     "contextlib",
     "OrderedDict",
+    "normalvariate",
     "ThreadPoolExecutor",
     "run_tasks_concurrently",
     "run_tasks_concurrently_async",
