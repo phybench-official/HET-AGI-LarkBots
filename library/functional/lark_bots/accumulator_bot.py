@@ -70,8 +70,7 @@ class AccumulatorBot(ParallelThreadLarkBot):
         context["sum"] += current_number
         
         response = f"{' + '.join(str(number) for number in context['numbers'])} = {context['sum']}"
-        reply_message_result = await asyncio.to_thread(
-            self.reply_message,
+        reply_message_result = await self.reply_message_async(
             response = response,
             message_id = message_id,
             reply_in_thread = True,
