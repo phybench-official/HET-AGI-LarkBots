@@ -94,7 +94,7 @@ class ProblemSolverBot(ParallelThreadLarkBot):
                 prompt = prompt,
                 model = "Qwen-VL-Max",
                 images = image_bytes_list,
-                image_placeholder = self._image_placeholder,
+                image_placeholder = self.image_placeholder,
                 tools = [
                     python_tool(timeout=30, verbose=True),
                     wolfram_tool(timeout=60, verbose=True),

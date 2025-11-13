@@ -1,5 +1,5 @@
 from .lark_bot import *
-from .lark_sdk import *
+from ._lark_sdk import *
 from ..typing import *
 from ..externals import *
 

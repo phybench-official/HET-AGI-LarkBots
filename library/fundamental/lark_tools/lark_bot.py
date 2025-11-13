@@ -1,6 +1,6 @@
 from ..typing import *
 from ..externals import *
-from .lark_sdk import *
+from ._lark_sdk import *
 from ..json_tools import *
 from ..backoff_decorators import *
 
@@ -32,12 +32,31 @@ def get_lark_document_url(
     return lark_document_url
 
 
-_create_document_backoff_seconds = [1.0] * 32 + [2.0] * 32 + [4.0] * 32 + [8.0] * 32
-_overwrite_document_backoff_seconds = [1.0] * 32 + [2.0] * 32 + [4.0] * 32 + [8.0] * 32
-_delete_file_backoff_seconds = [1.0] * 32 + [2.0] * 32 + [4.0] * 32 + [8.0] * 32
-
-
+never_used_string = f"1145141919810_{get_time_stamp(show_minute=True, show_second=True)}"
 class LarkBot:
+    
+    text_block_type = 2
+    first_heading_block_type = 3
+    second_heading_block_type = 4
+    third_heading_block_type = 5
+    equation_block_type = 16
+    image_block_type = 27
+    
+    image_placeholder = f"<image_never_used_{never_used_string}>"
+    begin_of_hyperlink = f"<hyperlink_never_used_{never_used_string}>"
+    end_of_hyperlink = f"</hyperlink_never_used_{never_used_string}>"
+    begin_of_equation = f"<equation_never_used_{never_used_string}>"
+    end_of_equation = f"</equation_never_used_{never_used_string}>"
+    begin_of_first_heading = f"<first_heading_never_used_{never_used_string}>"
+    end_of_first_heading = f"</first_heading_never_used_{never_used_string}>"
+    begin_of_second_heading = f"<second_heading_never_used_{never_used_string}>"
+    end_of_second_heading = f"</second_heading_never_used_{never_used_string}>"
+    begin_of_third_heading = f"<third_heading_never_used_{never_used_string}>"
+    end_of_third_heading = f"</third_heading_never_used_{never_used_string}>"
+    
+    create_document_backoff_seconds = [1.0] * 32 + [2.0] * 32 + [4.0] * 32 + [8.0] * 32
+    overwrite_document_backoff_seconds = [1.0] * 32 + [2.0] * 32 + [4.0] * 32 + [8.0] * 32
+    delete_file_backoff_seconds = [1.0] * 32 + [2.0] * 32 + [4.0] * 32 + [8.0] * 32
     
     def __init__(
         self,
@@ -62,9 +81,7 @@ class LarkBot:
             level = lark.LogLevel.DEBUG
         )
         
-        self._image_placeholder = "<image_never_used_1145141919810abcdef>"
-        self._begin_of_hyperlink = "<hyperlink_never_used_1145141919810abcdef>"
-        self._end_of_hyperlink = "</hyperlink_never_used_1145141919810abcdef>"
+        
     
     
     def register_message_receive(
@@ -174,11 +191,11 @@ class LarkBot:
                     if tag == "text":
                         text += line_element["text"]
                     elif tag == "img":
-                        text += self._image_placeholder
+                        text += self.image_placeholder
                         image_key = line_element["image_key"]
                         image_keys.append(image_key)
                     elif tag == "a":
-                        text += self._begin_of_hyperlink + line_element["text"] + self._end_of_hyperlink
+                        text += self.begin_of_hyperlink + line_element["text"] + self.end_of_hyperlink
                         hyperlink = line_element["href"]
                         hyperlinks.append(hyperlink)
                     elif tag == "at":
@@ -333,13 +350,13 @@ class LarkBot:
         hyperlinks: List[str],
     )-> ReplyMessageRequest:
         
-        image_count = response.count(self._image_placeholder)
+        image_count = response.count(self.image_placeholder)
         assert image_count == len(image_keys), (
             f"图片占位符数量 ({image_count}) "
             f"与 image_keys 列表长度 ({len(image_keys)}) 不匹配"
         )
-        link_begin_count = response.count(self._begin_of_hyperlink)
-        link_end_count = response.count(self._end_of_hyperlink)
+        link_begin_count = response.count(self.begin_of_hyperlink)
+        link_end_count = response.count(self.end_of_hyperlink)
         assert link_begin_count == link_end_count, (
             f"超链接开始标记 ({link_begin_count}) "
             f"和结束标记 ({link_end_count}) 数量不匹配"
@@ -352,11 +369,11 @@ class LarkBot:
         image_key_iter = iter(image_keys)
         hyperlink_iter = iter(hyperlinks)
         
-        image_pattern = f"({re.escape(self._image_placeholder)})"
+        image_pattern = f"({re.escape(self.image_placeholder)})"
         hyperlink_pattern = (
-            f"({re.escape(self._begin_of_hyperlink)}"
+            f"({re.escape(self.begin_of_hyperlink)}"
             f".*?"
-            f"{re.escape(self._end_of_hyperlink)})"
+            f"{re.escape(self.end_of_hyperlink)})"
         )
         combined_pattern = re.compile(f"{image_pattern}|{hyperlink_pattern}")
         line_elements_list: List[List[Dict[str, Any]]] = []
@@ -365,14 +382,14 @@ class LarkBot:
             parts: List[str] = combined_pattern.split(content_line)
             for part in parts:
                 if not part: continue
-                if part == self._image_placeholder:
+                if part == self.image_placeholder:
                     line_elements.append({
                         "tag": "img",
                         "image_key": next(image_key_iter)
                     })
-                elif part.startswith(self._begin_of_hyperlink):
-                    start_len = len(self._begin_of_hyperlink)
-                    end_len = len(self._end_of_hyperlink)
+                elif part.startswith(self.begin_of_hyperlink):
+                    start_len = len(self.begin_of_hyperlink)
+                    end_len = len(self.end_of_hyperlink)
                     link_text = part[start_len:-end_len]
                     line_elements.append({
                         "tag": "a",
@@ -508,7 +525,8 @@ class LarkBot:
         create_message_result = await self._lark_client.im.v1.message.acreate(request)
         return create_message_result
     
-
+    
+    # https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/create?appId=cli_a98f4b47a778100c
     def _build_create_document_request(
         self,
         title: str,
@@ -519,16 +537,13 @@ class LarkBot:
         request_body_builder = request_body_builder.title(title)
         request_body_builder = request_body_builder.folder_token(folder_token)
         request_body = request_body_builder.build()
-        
         request_builder = CreateDocumentRequest.builder()
         request_builder = request_builder.request_body(request_body)
         request = request_builder.build()
-        
         return request
-
-
-    # https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/create?appId=cli_a98f4b47a778100c
-    @backoff(_create_document_backoff_seconds)
+    
+    
+    @backoff(create_document_backoff_seconds)
     def create_document(
         self,
         title: str,
@@ -554,7 +569,7 @@ class LarkBot:
         return result
     
     
-    @backoff_async(_create_document_backoff_seconds)
+    @backoff_async(create_document_backoff_seconds)
     async def create_document_async(
         self,
         title: str,
@@ -580,6 +595,186 @@ class LarkBot:
         return result
     
     
+    def _build_text_block(
+        self,
+        content: str,
+    )-> Block:
+        
+        text_run = TextRun.builder().content(content).build()
+        text_element = TextElement.builder().text_run(text_run).build()
+        text = Text.builder().elements([text_element]).build()
+        block = Block.builder().block_type(self.text_block_type).text(text).build()
+        return block
+
+    
+    def _build_heading_block(
+        self,
+        content: str,
+        level: int,
+    )-> Block:
+        
+        text_run = TextRun.builder().content(content).build()
+        text_element = TextElement.builder().text_run(text_run).build()
+        text = Text.builder().elements([text_element]).build()
+        if level == 1:
+            block = Block.builder().block_type(self.first_heading_block_type).heading1(text).build()
+            return block
+        elif level == 2:
+            block = Block.builder().block_type(self.second_heading_block_type).heading2(text).build()
+            return block
+        elif level == 3:
+            block = Block.builder().block_type(self.third_heading_block_type).heading3(text).build()
+            return block
+        else:
+            raise NotImplementedError
+
+
+    def _build_equation_block(
+        self,
+        content: str,
+    )-> Block:
+        
+        equation = Equation.builder().content(content).build()
+        text_element = TextElement.builder().equation(equation).build()
+        text = Text.builder().elements([text_element]).build()
+        block = Block.builder().block_type(self.equation_block_type).equation(text).build()
+        return block
+    
+    
+    def _build_image_block(
+        self,
+        image_key: str,
+    )-> Block:
+        
+        image = Image.builder().token(image_key).build()
+        block = Block.builder().block_type(self.image_block_type).image(image).build()
+        return block
+    
+    
+    def build_document_blocks(
+        self,
+        content: str,
+        image_keys: List[str],
+    )-> List[Block]:
+        
+        image_key_iter = iter(image_keys)
+        blocks: List[Block] = []
+
+        # (img)
+        img_pattern = f"({re.escape(self.image_placeholder)})"
+        # (h1)
+        h1_pattern = (
+            f"({re.escape(self.begin_of_first_heading)}"
+            f".*?"
+            f"{re.escape(self.end_of_first_heading)})"
+        )
+        # (h2)
+        h2_pattern = (
+            f"({re.escape(self.begin_of_second_heading)}"
+            f".*?"
+            f"{re.escape(self.end_of_second_heading)})"
+        )
+        # (h3)
+        h3_pattern = (
+            f"({re.escape(self.begin_of_third_heading)}"
+            f".*?"
+            f"{re.escape(self.end_of_third_heading)})"
+        )
+        # (eq)
+        eq_pattern = (
+            f"({re.escape(self.begin_of_equation)}"
+            f".*?"
+            f"{re.escape(self.end_of_equation)})"
+        )
+        
+        combined_pattern = re.compile(
+            f"{img_pattern}|{h1_pattern}|{h2_pattern}|{h3_pattern}|{eq_pattern}"
+        )
+        
+        # 使用 re.split() 切割字符串，保留所有匹配到的占位符
+        parts: List[str] = combined_pattern.split(content)
+        
+        for part in parts:
+            if not part: continue
+            # image block
+            if part == self.image_placeholder:
+                try:
+                    key = next(image_key_iter)
+                    blocks.append(self._build_image_block(key))
+                except StopIteration:
+                    print(f"[LarkBot] 警告: 发现图片占位符，但 image_keys 已耗尽")
+                    blocks.append(self._build_text_block("[图片加载失败]"))
+            # H1 title block
+            elif part.startswith(self.begin_of_first_heading):
+                text = part[len(self.begin_of_first_heading):-len(self.end_of_first_heading)]
+                blocks.append(self._build_heading_block(text, level=1))
+            # H2 title block  
+            elif part.startswith(self.begin_of_second_heading):
+                text = part[len(self.begin_of_second_heading):-len(self.end_of_second_heading)]
+                blocks.append(self._build_heading_block(text, level=2))
+            # H3 title block
+            elif part.startswith(self.begin_of_third_heading):
+                text = part[len(self.begin_of_third_heading):-len(self.end_of_third_heading)]
+                blocks.append(self._build_heading_block(text, level=3))
+            # equation block
+            elif part.startswith(self.begin_of_equation):
+                text = part[len(self.begin_of_equation):-len(self.end_of_equation)]
+                blocks.append(self._build_equation_block(text))
+            # text block
+            else:
+                blocks.append(self._build_text_block(part))
+        
+        return blocks
+    
+    
+    @backoff_async(overwrite_document_backoff_seconds)
+    async def overwrite_document_async(
+        self,
+        document_id: str,
+        content: str,
+        image_keys: List[str] = [],
+    )-> None:
+        
+        document_root_block_id = document_id
+        assert self._lark_client.docx
+
+        while True:
+            delete_body_builder = BatchDeleteDocumentBlockChildrenRequestBody.builder()
+            delete_body_builder = delete_body_builder.start_index(0)
+            delete_body_builder = delete_body_builder.end_index(1)
+            delete_request_body = delete_body_builder.build()
+            delete_request_builder = BatchDeleteDocumentBlockChildrenRequest.builder()
+            delete_request_builder = delete_request_builder.document_id(document_id)
+            delete_request_builder = delete_request_builder.block_id(document_root_block_id)
+            delete_request_builder = delete_request_builder.request_body(delete_request_body)
+            delete_request = delete_request_builder.build()
+            delete_response = await self._lark_client.docx.v1.document_block_children.abatch_delete(delete_request)
+            if not delete_response.success(): break
+        
+        blocks = self.build_document_blocks(
+            content = content,
+            image_keys = image_keys,
+        )
+        if not blocks: return None
+        insert_body_builder = CreateDocumentBlockChildrenRequestBody.builder()
+        insert_body_builder = insert_body_builder.children(blocks)
+        insert_body_builder = insert_body_builder.index(0)
+        insert_request_body = insert_body_builder.build()
+
+        insert_request_builder = CreateDocumentBlockChildrenRequest.builder()
+        insert_request_builder = insert_request_builder.document_id(document_id)
+        insert_request_builder = insert_request_builder.block_id(document_root_block_id) 
+        insert_request_builder = insert_request_builder.request_body(insert_request_body)
+        insert_request = insert_request_builder.build()
+        
+        insert_response = await self._lark_client.docx.v1.document_block_children.acreate(insert_request)
+        
+        if not insert_response.success():
+            raise RuntimeError(f"Failed to insert new blocks: {insert_response.code} {insert_response.msg}")
+
+        return None
+    
+    
     def _build_delete_file_request(
         self,
         file_token: str,
@@ -593,7 +788,7 @@ class LarkBot:
         return request
     
     
-    @backoff(_delete_file_backoff_seconds)
+    @backoff(delete_file_backoff_seconds)
     def delete_file(
         self,
         file_token: str,
@@ -604,7 +799,6 @@ class LarkBot:
             file_token = file_token,
             file_type = file_type,
         )
-        
         assert self._lark_client.drive
         delete_file_response = self._lark_client.drive.v1.file.delete(request)
         if not delete_file_response.success():
@@ -613,7 +807,7 @@ class LarkBot:
             return None
     
     
-    @backoff_async(_delete_file_backoff_seconds)
+    @backoff_async(delete_file_backoff_seconds)
     async def delete_file_async(
         self,
         file_token: str,
@@ -631,55 +825,3 @@ class LarkBot:
             raise RuntimeError
         else:
             return None
-    
-    
-    @backoff_async(_overwrite_document_backoff_seconds)
-    async def overwrite_document_async(
-        self,
-        document_id: str,
-        text_elements: List[TextElement],
-    )-> None:
-        
-        document_root_block_id = document_id
-        assert self._lark_client.docx
-        
-        while True:
-            delete_body_builder = BatchDeleteDocumentBlockChildrenRequestBody.builder()
-            delete_body_builder = delete_body_builder.start_index(0)
-            delete_body_builder = delete_body_builder.end_index(1)
-            delete_request_body = delete_body_builder.build()
-            delete_request_builder = BatchDeleteDocumentBlockChildrenRequest.builder()
-            delete_request_builder = delete_request_builder.document_id(document_id)
-            delete_request_builder = delete_request_builder.block_id(document_root_block_id)
-            delete_request_builder = delete_request_builder.request_body(delete_request_body)
-            delete_request = delete_request_builder.build()
-            delete_response = await self._lark_client.docx.v1.document_block_children.abatch_delete(delete_request)
-            if not delete_response.success(): break
-        
-        text_builder = Text.builder()
-        text_builder = text_builder.elements(text_elements)
-        text = text_builder.build()
-        
-        text_block_type = 2
-        child_block_builder = Block.builder()
-        child_block_builder = child_block_builder.block_type(text_block_type)
-        child_block_builder = child_block_builder.text(text)
-        child_block = child_block_builder.build()
-
-        insert_body_builder = CreateDocumentBlockChildrenRequestBody.builder()
-        insert_body_builder = insert_body_builder.children([child_block])
-        insert_body_builder = insert_body_builder.index(0)
-        insert_request_body = insert_body_builder.build()
-
-        insert_request_builder = CreateDocumentBlockChildrenRequest.builder()
-        insert_request_builder = insert_request_builder.document_id(document_id)
-        insert_request_builder = insert_request_builder.block_id(document_root_block_id) 
-        insert_request_builder = insert_request_builder.request_body(insert_request_body)
-        insert_request = insert_request_builder.build()
-        
-        insert_response = await self._lark_client.docx.v1.document_block_children.acreate(insert_request)
-        
-        if not insert_response.success():
-            raise RuntimeError(f"Failed to insert new blocks: {insert_response.code} {insert_response.msg}")
-
-        return None

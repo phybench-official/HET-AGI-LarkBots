@@ -7,7 +7,7 @@ __all__ = [
 
 
 class LarkDocumentTestBot(ParallelThreadLarkBot):
-    
+
     def __init__(
         self,
         lark_bot_name: str,
@@ -26,8 +26,10 @@ class LarkDocumentTestBot(ParallelThreadLarkBot):
         self._acceptance_cache_size: int = context_cache_size
         self._acceptance_cache: OrderedDict[str, bool] = OrderedDict()
         
+        self._mention_me_text = "@做题家"
         self._PKU_alumni_association = "lcnt4qemj6yx"
         self._eureka_lab_bot_file_root = "AqFDfBPoRlFaREdcWPecbO6SnKe"
+        self._uploaded_test_image_key = "img_v3_02s0_9c0670aa-5608-4bba-9ab0-1c89ab9478fg"
     
     
     def should_process(
@@ -132,8 +134,8 @@ class LarkDocumentTestBot(ParallelThreadLarkBot):
                     )
                     return context
             
-            text = text.replace(self._begin_of_hyperlink, "")
-            text = text.replace(self._end_of_hyperlink, "")
+            text = text.replace(self.begin_of_hyperlink, "")
+            text = text.replace(self.end_of_hyperlink, "")
             
             document_id: Optional[str] = context["document_id"]
             if document_id is None:
@@ -162,17 +164,24 @@ class LarkDocumentTestBot(ParallelThreadLarkBot):
                 assert document_title is not None
                 assert document_url is not None
 
-            text = text.replace("@做题家", "")
-            text_run_builder = TextRun.builder()
-            text_run_builder = text_run_builder.content(text)
-            text_run = text_run_builder.build()
-            text_element_builder = TextElement.builder()
-            text_element_builder = text_element_builder.text_run(text_run)
-            text_element = text_element_builder.build()
+            text = text.replace(self._mention_me_text, "")
+            content = ""
+            content += f"{self.begin_of_third_heading}你刚刚新发的内容{self.end_of_third_heading}"
+            content += text
+            content += f"{self.begin_of_third_heading}云文档图片上传展示{self.end_of_third_heading}"
+            content += self.image_placeholder
+            content += f"{self.begin_of_third_heading}云文档公式渲染展示{self.end_of_third_heading}"
+#             content += f"""这是一个行内公式：{self.begin_of_equation}\\sqrt{{2}}\\ne\\frac{{p}}{{q}}{self.end_of_equation}，它在行内
+# {self.begin_of_equation}\\boxed{{2^x+1=3^y, x, y \\in \\mathbb{{N}}^* \\Rightarrow (x,y)=(1,1) \\text{{ or }} (x,y)=(3,2)}}{self.end_of_equation}
+# {self.begin_of_equation}(M^{-1})^\\dagger = \\left[ \\exp\\left(\\frac{{i}}{{2}} \\omega_{{\\mu\\nu}} \\sigma^{{\\mu\\nu}}\\right) \\right]^\\dagger = \\exp\\left( -\\frac{{i}}{{2}} \\omega_{{\\mu\\nu}} (\\sigma^{{\\mu\\nu}})^\\dagger \\right){self.end_of_equation}
+# """
+            content += "WIP."
+
             try:
                 await self.overwrite_document_async(
                     document_id = document_id,
-                    text_elements = [text_element],
+                    content = content,
+                    image_keys = [self._uploaded_test_image_key],
                 )
             except:
                 print("[LarkDocumentTestBot] 更新文档失败")
@@ -180,14 +189,14 @@ class LarkDocumentTestBot(ParallelThreadLarkBot):
             
             if on_creation:
                 await self.reply_message_async(
-                    response = f"已创建文档 {self._begin_of_hyperlink}{document_title}{self._end_of_hyperlink}",
+                    response = f"已创建文档 {self.begin_of_hyperlink}{document_title}{self.end_of_hyperlink}",
                     message_id = message_id,
                     reply_in_thread = True,
                     hyperlinks = [document_url],
                 )
             else:
                 await self.reply_message_async(
-                    response = f"文档 {self._begin_of_hyperlink}{document_title}{self._end_of_hyperlink} 已更新~",
+                    response = f"文档 {self.begin_of_hyperlink}{document_title}{self.end_of_hyperlink} 已更新~",
                     message_id = message_id,
                     reply_in_thread = True,
                     hyperlinks = [document_url],

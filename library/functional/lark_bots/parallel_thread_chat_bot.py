@@ -115,7 +115,7 @@ class ParallelThreadChatBot(ParallelThreadLarkBot):
                 prompt = context["history"]["prompt"],
                 model = "Qwen-VL-Max",
                 images = context["history"]["images"],
-                image_placeholder = self._image_placeholder,
+                image_placeholder = self.image_placeholder,
                 tools = [
                     python_tool(timeout=30, verbose=True),
                 ],

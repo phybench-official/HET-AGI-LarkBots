@@ -1,7 +1,9 @@
 import lark_oapi as lark
 from lark_oapi.api.docx.v1 import Text
 from lark_oapi.api.docx.v1 import Block
+from lark_oapi.api.docx.v1 import Image
 from lark_oapi.api.docx.v1 import TextRun
+from lark_oapi.api.docx.v1 import Equation
 from lark_oapi.api.docx.v1 import TextElement
 from lark_oapi.api.docx.v1 import UpdateTextRequest
 from lark_oapi.api.docx.v1 import UpdateBlockRequest
@@ -14,6 +16,9 @@ from lark_oapi.api.im.v1 import GetMessageResourceResponse
 from lark_oapi.api.im.v1 import CreateMessageRequest
 from lark_oapi.api.im.v1 import CreateMessageResponse
 from lark_oapi.api.im.v1 import CreateMessageRequestBody
+from lark_oapi.api.im.v1 import CreateImageRequest
+from lark_oapi.api.im.v1 import CreateImageResponse
+from lark_oapi.api.im.v1 import CreateImageRequestBody
 from lark_oapi.api.drive.v1 import DeleteFileRequest
 from lark_oapi.api.drive.v1 import DeleteFileResponse
 from lark_oapi.api.docx.v1 import CreateDocumentRequest
@@ -34,7 +39,9 @@ __all__ = [
     "lark",
     "Text",
     "Block",
+    "Image",
     "TextRun",
+    "Equation",
     "TextElement",
     "UpdateTextRequest",
     "UpdateBlockRequest",
@@ -47,6 +54,9 @@ __all__ = [
     "CreateMessageRequest",
     "CreateMessageResponse",
     "CreateMessageRequestBody",
+    "CreateImageRequest",
+    "CreateImageResponse",
+    "CreateImageRequestBody",
     "DeleteFileRequest",
     "DeleteFileResponse",
     "CreateDocumentRequest",
