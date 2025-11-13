@@ -25,6 +25,9 @@ class DevelopHelperBot(ParallelThreadLarkBot):
         
         self._acceptance_cache_size: int = context_cache_size
         self._acceptance_cache: OrderedDict[str, bool] = OrderedDict()
+        
+        self._PKU_alumni_association = "lcnt4qemj6yx"
+        self._eureka_lab_bot_file_root = "AqFDfBPoRlFaREdcWPecbO6SnKe"
     
     
     def should_process(
@@ -65,7 +68,8 @@ class DevelopHelperBot(ParallelThreadLarkBot):
         return {
             "is_accepted": is_accepted,
             "document_id": None,
-            "title": None,
+            "document_title": None,
+            "document_url": None,
         }
 
     
@@ -103,26 +107,32 @@ class DevelopHelperBot(ParallelThreadLarkBot):
             text = text.replace(self._begin_of_hyperlink, "")
             text = text.replace(self._end_of_hyperlink, "")
             
-            eureka_lab_bot_file_root = "AqFDfBPoRlFaREdcWPecbO6SnKe"
             document_id: Optional[str] = context["document_id"]
             if document_id is None:
                 on_creation = True
-                title = f"测试文档-{get_time_stamp(show_minute=True, show_second=True)}"
+                document_title = f"测试文档-{get_time_stamp(show_minute=True, show_second=True)}"
                 create_document_result = await self.create_document_async(
-                    title = title,
-                    folder_token = eureka_lab_bot_file_root,
+                    title = document_title,
+                    folder_token = self._eureka_lab_bot_file_root,
                 )
                 if not create_document_result["success"]:
                     print("[DevelopHelperBot] 获取文档失败")
                     return context
                 document_id = create_document_result["document_id"]
-                context["document_id"] = document_id
-                context["title"] = title
                 assert document_id is not None
+                document_url = get_lark_document_url(
+                    tenant = self._PKU_alumni_association,
+                    document_id = document_id,
+                )
+                context["document_id"] = document_id
+                context["document_title"] = document_title
+                context["document_url"] = document_url
             else:
                 on_creation = False
-                title = context["title"]
-                assert title is not None
+                document_title = context["document_title"]
+                document_url = context["document_url"]
+                assert document_title is not None
+                assert document_url is not None
 
             text = text.replace("@做题家", "")
             text_run_builder = TextRun.builder()
@@ -142,15 +152,17 @@ class DevelopHelperBot(ParallelThreadLarkBot):
             
             if on_creation:
                 await self.reply_message_async(
-                    response = f"已创建文档 {title}",
+                    response = f"已创建文档 {self._begin_of_hyperlink}{document_title}{self._end_of_hyperlink}",
                     message_id = message_id,
                     reply_in_thread = True,
+                    hyperlinks = [document_url],
                 )
             else:
                 await self.reply_message_async(
-                    response = f"文档 {title} 已更新~",
+                    response = f"文档 {self._begin_of_hyperlink}{document_title}{self._end_of_hyperlink} 已更新~",
                     message_id = message_id,
                     reply_in_thread = True,
+                    hyperlinks = [document_url],
                 )
             
             return context

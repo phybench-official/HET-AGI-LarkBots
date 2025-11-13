@@ -7,6 +7,7 @@ from ..backoff_decorators import *
 
 __all__ = [
     "get_lark_bot_token",
+    "get_lark_document_url",
     "LarkBot",
 ]
 
@@ -31,8 +32,8 @@ def get_lark_document_url(
     return lark_document_url
 
 
-_create_document_backoff_seconds = [1.0] * 64
-_overwrite_document_backoff_seconds = [1.0] * 64
+_create_document_backoff_seconds = [1.0] * 32 + [2.0] * 32 + [4.0] * 32
+_overwrite_document_backoff_seconds = [1.0] * 32 + [2.0] * 32 + [4.0] * 32
 
 
 class LarkBot:
@@ -245,6 +246,21 @@ class LarkBot:
             }
     
     
+    def _build_get_message_resource_request(
+        self,
+        message_id: str,
+        resource_key: str,
+        resource_type: Literal["image", "file"],
+    )-> GetMessageResourceRequest:
+        
+        request_builder = GetMessageResourceRequest.builder()
+        request_builder = request_builder.message_id(message_id)
+        request_builder = request_builder.file_key(resource_key)
+        request_builder = request_builder.type(resource_type)
+        request = request_builder.build()
+        return request
+    
+    
     def get_message_resource(
         self,
         message_id: str,
@@ -252,11 +268,11 @@ class LarkBot:
         resource_type: Literal["image", "file"],
     )-> Any:
 
-        request_builder = GetMessageResourceRequest.builder()
-        request_builder = request_builder.message_id(message_id)
-        request_builder = request_builder.file_key(resource_key)
-        request_builder = request_builder.type(resource_type)
-        request = request_builder.build()
+        request = self._build_get_message_resource_request(
+            message_id = message_id,
+            resource_key = resource_key,
+            resource_type = resource_type,
+        )
         assert self._lark_client.im
         get_message_resource_result = self._lark_client.im.v1.message_resource.get(request)
         return get_message_resource_result
@@ -269,11 +285,11 @@ class LarkBot:
         resource_type: Literal["image", "file"],
     )-> Any:
         
-        request_builder = GetMessageResourceRequest.builder()
-        request_builder = request_builder.message_id(message_id)
-        request_builder = request_builder.file_key(resource_key)
-        request_builder = request_builder.type(resource_type)
-        request = request_builder.build()
+        request = self._build_get_message_resource_request(
+            message_id = message_id,
+            resource_key = resource_key,
+            resource_type = resource_type,
+        )
         assert self._lark_client.im
         get_message_resource_result = await self._lark_client.im.v1.message_resource.aget(request)
         return get_message_resource_result
@@ -402,8 +418,13 @@ class LarkBot:
         hyperlinks: List[str] = [],
     )-> ReplyMessageResponse:
         
-        request = self._build_reply_message_request(response, message_id, reply_in_thread, 
-                                                    image_keys, hyperlinks)
+        request = self._build_reply_message_request(
+            response = response, 
+            message_id = message_id, 
+            reply_in_thread = reply_in_thread, 
+            image_keys = image_keys, 
+            hyperlinks = hyperlinks,
+        )
         assert self._lark_client.im
         reply_message_result = self._lark_client.im.v1.message.reply(request)
         return reply_message_result
@@ -418,19 +439,24 @@ class LarkBot:
         hyperlinks: List[str] = [],
     )-> ReplyMessageResponse:
         
-        request = self._build_reply_message_request(response, message_id, reply_in_thread, 
-                                                    image_keys, hyperlinks)
+        request = self._build_reply_message_request(
+            response = response, 
+            message_id = message_id,
+            reply_in_thread = reply_in_thread, 
+            image_keys = image_keys, 
+            hyperlinks = hyperlinks,
+        )
         assert self._lark_client.im
         reply_message_result = await self._lark_client.im.v1.message.areply(request)
         return reply_message_result
     
     
-    def send_message(
+    def _build_send_message_request(
         self,
         receive_id_type: Literal["chat_id", "open_id", "user_id"],
         receive_id: str,
         content: str,
-    )-> CreateMessageResponse:
+    )-> CreateMessageRequest:
         
         message_content = serialize_json({"text": content})
         
@@ -445,6 +471,21 @@ class LarkBot:
         request_builder = request_builder.request_body(request_body)
         request = request_builder.build()
         
+        return request
+    
+    
+    def send_message(
+        self,
+        receive_id_type: Literal["chat_id", "open_id", "user_id"],
+        receive_id: str,
+        content: str,
+    )-> CreateMessageResponse:
+        
+        request = self._build_send_message_request(
+            receive_id_type = receive_id_type,
+            receive_id = receive_id,
+            content = content,
+        )
         assert self._lark_client.im
         create_message_result = self._lark_client.im.v1.message.create(request)
         return create_message_result
@@ -457,31 +498,21 @@ class LarkBot:
         content: str,
     )-> CreateMessageResponse:
 
-        message_content = serialize_json({"text": content})
-        
-        request_body_builder = CreateMessageRequestBody.builder()
-        request_body_builder = request_body_builder.receive_id(receive_id)
-        request_body_builder = request_body_builder.content(message_content)
-        request_body_builder = request_body_builder.msg_type("text")
-        request_body = request_body_builder.build()
-        
-        request_builder = CreateMessageRequest.builder()
-        request_builder = request_builder.receive_id_type(receive_id_type)
-        request_builder = request_builder.request_body(request_body)
-        request = request_builder.build()
-        
+        request = self._build_send_message_request(
+            receive_id_type = receive_id_type,
+            receive_id = receive_id,
+            content = content,
+        )
         assert self._lark_client.im
         create_message_result = await self._lark_client.im.v1.message.acreate(request)
         return create_message_result
     
 
-    # https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/create?appId=cli_a98f4b47a778100c
-    @backoff(_create_document_backoff_seconds)
-    def create_document(
+    def _build_create_document_request(
         self,
         title: str,
         folder_token: str,
-    )-> Dict[str, Any]:
+    )-> CreateDocumentRequest:
         
         request_body_builder = CreateDocumentRequestBody.builder()
         request_body_builder = request_body_builder.title(title)
@@ -492,6 +523,21 @@ class LarkBot:
         request_builder = request_builder.request_body(request_body)
         request = request_builder.build()
         
+        return request
+
+
+    # https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/create?appId=cli_a98f4b47a778100c
+    @backoff(_create_document_backoff_seconds)
+    def create_document(
+        self,
+        title: str,
+        folder_token: str,
+    )-> Dict[str, Any]:
+        
+        request = self._build_create_document_request(
+            title = title,
+            folder_token = folder_token,
+        )
         assert self._lark_client.docx
         create_document_result = self._lark_client.docx.v1.document.create(request)
         result: Dict[str, Any] = {
@@ -506,6 +552,7 @@ class LarkBot:
             raise RuntimeError
         return result
     
+    
     @backoff_async(_create_document_backoff_seconds)
     async def create_document_async(
         self,
@@ -513,15 +560,10 @@ class LarkBot:
         folder_token: str,
     )-> Dict[str, Any]:
         
-        request_body_builder = CreateDocumentRequestBody.builder()
-        request_body_builder = request_body_builder.title(title)
-        request_body_builder = request_body_builder.folder_token(folder_token)
-        request_body = request_body_builder.build()
-        
-        request_builder = CreateDocumentRequest.builder()
-        request_builder = request_builder.request_body(request_body)
-        request = request_builder.build()
-        
+        request = self._build_create_document_request(
+            title = title,
+            folder_token = folder_token,
+        )
         assert self._lark_client.docx
         create_document_result = await self._lark_client.docx.v1.document.acreate(request)
         result: Dict[str, Any] = {
@@ -536,57 +578,6 @@ class LarkBot:
             raise RuntimeError
         return result
     
-    
-    @backoff(_overwrite_document_backoff_seconds)
-    def overwrite_document(
-        self,
-        document_id: str,
-        text_elements: List[TextElement],
-    )-> None:
-        
-        document_root_block_id = document_id
-        assert self._lark_client.docx
-        
-        while True:
-            delete_body_builder = BatchDeleteDocumentBlockChildrenRequestBody.builder()
-            delete_body_builder = delete_body_builder.start_index(0)
-            delete_body_builder = delete_body_builder.end_index(1)
-            delete_request_body = delete_body_builder.build()
-            delete_request_builder = BatchDeleteDocumentBlockChildrenRequest.builder()
-            delete_request_builder = delete_request_builder.document_id(document_id)
-            delete_request_builder = delete_request_builder.block_id(document_root_block_id)
-            delete_request_builder = delete_request_builder.request_body(delete_request_body)
-            delete_request = delete_request_builder.build()
-            delete_response = self._lark_client.docx.v1.document_block_children.batch_delete(delete_request)
-            if not delete_response.success(): break
-        
-        text_builder = Text.builder()
-        text_builder = text_builder.elements(text_elements)
-        text = text_builder.build()
-        
-        text_block_type = 2
-        child_block_builder = Block.builder()
-        child_block_builder = child_block_builder.block_type(text_block_type)
-        child_block_builder = child_block_builder.text(text)
-        child_block = child_block_builder.build()
-
-        insert_body_builder = CreateDocumentBlockChildrenRequestBody.builder()
-        insert_body_builder = insert_body_builder.children([child_block])
-        insert_body_builder = insert_body_builder.index(0)
-        insert_request_body = insert_body_builder.build()
-
-        insert_request_builder = CreateDocumentBlockChildrenRequest.builder()
-        insert_request_builder = insert_request_builder.document_id(document_id)
-        insert_request_builder = insert_request_builder.block_id(document_root_block_id) 
-        insert_request_builder = insert_request_builder.request_body(insert_request_body)
-        insert_request = insert_request_builder.build()
-        
-        insert_response = self._lark_client.docx.v1.document_block_children.create(insert_request)
-        
-        if not insert_response.success():
-            raise RuntimeError(f"Failed to insert new blocks: {insert_response.code} {insert_response.msg}")
-
-        return None
 
     @backoff_async(_overwrite_document_backoff_seconds)
     async def overwrite_document_async(
