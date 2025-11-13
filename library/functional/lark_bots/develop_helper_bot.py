@@ -1,0 +1,165 @@
+from ...fundamental import *
+
+
+__all__ = [
+    "DevelopHelperBot",
+]
+
+
+class DevelopHelperBot(ParallelThreadLarkBot):
+
+    def __init__(
+        self,
+        lark_bot_name: str,
+        worker_timeout: float = 600.0,
+        context_cache_size: int = 1024,
+        max_workers: Optional[int] = None,
+    )-> None:
+
+        super().__init__(
+            lark_bot_name = lark_bot_name,
+            worker_timeout = worker_timeout,
+            context_cache_size = context_cache_size,
+            max_workers = max_workers,
+        )
+        
+        self._acceptance_cache_size: int = context_cache_size
+        self._acceptance_cache: OrderedDict[str, bool] = OrderedDict()
+    
+    
+    def should_process(
+        self,
+        parsed_message: Dict[str, Any],
+    )-> bool:
+        
+        if parsed_message["chat_type"] == "group":
+            if parsed_message["is_thread_root"]:
+                if parsed_message["mentioned_me"]:
+                    thread_root_id: Optional[str] = parsed_message["thread_root_id"]
+                    assert thread_root_id
+                    print(f"[DevelopHelperBot] Root message {parsed_message['message_id']} accepted, adding to acceptance cache.")
+                    self._acceptance_cache[thread_root_id] = True
+                    self._acceptance_cache.move_to_end(thread_root_id)
+                    if len(self._acceptance_cache) > self._acceptance_cache_size:
+                        evicted_key, _ = self._acceptance_cache.popitem(last=False)
+                        print(f"[DevelopHelperBot] Evicted {evicted_key} from acceptance cache.")
+                    return True
+                else:
+                    print(f"[DevelopHelperBot] Dropping root message {parsed_message['message_id']} (not mentioned).")
+                    return False
+            else:
+                return True
+        else:
+            return True
+    
+    
+    async def get_initial_context(
+        self,
+        thread_root_id: str,
+    )-> Dict[str, Any]:
+
+        is_accepted: bool = thread_root_id in self._acceptance_cache
+        if not is_accepted:
+            print(f"[DevelopHelperBot] Thread {thread_root_id} not in acceptance cache. Ignoring.")
+
+        return {
+            "is_accepted": is_accepted,
+            "document_id": None,
+            "title": None,
+        }
+
+    
+    async def process_message_in_context(
+        self,
+        parsed_message: Dict[str, Any],
+        context: Dict[str, Any],
+    )-> Dict[str, Any]:
+        
+        try:
+            
+            message_id: str = parsed_message["message_id"]
+            chat_type: str = parsed_message["chat_type"]
+            is_thread_root: bool = parsed_message["is_thread_root"]
+            text: str = parsed_message["text"]
+            mentioned_me: bool = parsed_message["mentioned_me"]
+            
+            if chat_type == "group":
+                if not is_thread_root and not context["is_accepted"]:
+                    if mentioned_me:
+                        await self.reply_message_async(
+                            response = "请在群聊中@我~",
+                            message_id = message_id,
+                        )
+                    return context
+            else:
+                await self.reply_message_async(
+                    response = "请在群聊中与我对话~您可以拉一个我与您的小群",
+                    message_id = message_id,
+                )
+                return context
+            
+            print(f" -> [Worker] 收到任务: {text}，开始处理")
+            
+            text = text.replace(self._begin_of_hyperlink, "")
+            text = text.replace(self._end_of_hyperlink, "")
+            
+            eureka_lab_bot_file_root = "AqFDfBPoRlFaREdcWPecbO6SnKe"
+            document_id: Optional[str] = context["document_id"]
+            if document_id is None:
+                on_creation = True
+                title = f"测试文档-{get_time_stamp(show_minute=True, show_second=True)}"
+                create_document_result = await self.create_document_async(
+                    title = title,
+                    folder_token = eureka_lab_bot_file_root,
+                )
+                if not create_document_result["success"]:
+                    print("[DevelopHelperBot] 获取文档失败")
+                    return context
+                document_id = create_document_result["document_id"]
+                context["document_id"] = document_id
+                context["title"] = title
+                assert document_id is not None
+            else:
+                on_creation = False
+                title = context["title"]
+                assert title is not None
+
+            text = text.replace("@做题家", "")
+            text_run_builder = TextRun.builder()
+            text_run_builder = text_run_builder.content(text)
+            text_run = text_run_builder.build()
+            text_element_builder = TextElement.builder()
+            text_element_builder = text_element_builder.text_run(text_run)
+            text_element = text_element_builder.build()
+            try:
+                await self.overwrite_document_async(
+                    document_id = document_id,
+                    text_elements = [text_element],
+                )
+            except:
+                print("[DevelopHelperBot] 更新文档失败")
+                return context
+            
+            if on_creation:
+                await self.reply_message_async(
+                    response = f"已创建文档 {title}",
+                    message_id = message_id,
+                    reply_in_thread = True,
+                )
+            else:
+                await self.reply_message_async(
+                    response = f"文档 {title} 已更新~",
+                    message_id = message_id,
+                    reply_in_thread = True,
+                )
+            
+            return context
+        
+        except Exception as error:
+            print(
+                f"[DevelopHelperBot] Error during processing message: {error}\n"
+                f"{traceback.format_exc()}"
+            )
+        
+        return context
+    

@@ -22,7 +22,17 @@ def get_lark_bot_token(
     return app_id, app_secret, open_id
 
 
-_create_document_backoff_seconds = [1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0, 32.0]
+def get_lark_document_url(
+    tenant: str,
+    document_id: str,
+)-> str:
+    
+    lark_document_url = f"https://{tenant}.feishu.cn/docx/{document_id}?from=from_copylink\\"
+    return lark_document_url
+
+
+_create_document_backoff_seconds = [1.0] * 64
+_overwrite_document_backoff_seconds = [1.0] * 64
 
 
 class LarkBot:
@@ -51,6 +61,8 @@ class LarkBot:
         )
         
         self._image_placeholder = "<image_never_used_1145141919810abcdef>"
+        self._begin_of_hyperlink = "<hyperlink_never_used_1145141919810abcdef>"
+        self._end_of_hyperlink = "</hyperlink_never_used_1145141919810abcdef>"
     
     
     def register_message_receive(
@@ -142,6 +154,7 @@ class LarkBot:
                 "chat_type": chat_type,
                 "text": text,
                 "image_keys": [],
+                "hyperlinks": [],
                 "mentioned_me": mentioned_me,
                 "message_content_dict": message_content_dict,
             }
@@ -163,7 +176,7 @@ class LarkBot:
                         image_key = line_element["image_key"]
                         image_keys.append(image_key)
                     elif tag == "a":
-                        text += line_element["text"]
+                        text += self._begin_of_hyperlink + line_element["text"] + self._end_of_hyperlink
                         hyperlink = line_element["href"]
                         hyperlinks.append(hyperlink)
                     elif tag == "at":
@@ -182,9 +195,9 @@ class LarkBot:
                 "chat_type": chat_type,
                 "text": text,
                 "image_keys": image_keys,
+                "hyperlinks": hyperlinks,
                 "mentioned_me": mentioned_me,
                 "message_content_dict": message_content_dict,
-                "hyperlinks": hyperlinks,
             }
             return parse_message_result
         
@@ -199,6 +212,7 @@ class LarkBot:
                 "chat_type": chat_type,
                 "text": "",
                 "image_keys": [image_key],
+                "hyperlinks": [],
                 "mentioned_me": mentioned_me,
                 "message_content_dict": message_content_dict,
             }
@@ -216,6 +230,7 @@ class LarkBot:
                 "chat_type": chat_type,
                 "text": "",
                 "image_keys": [],
+                "hyperlinks": [],
                 "mentioned_me": mentioned_me,
                 "message_content_dict": message_content_dict,
                 "file_key": file_key,
@@ -245,6 +260,7 @@ class LarkBot:
         assert self._lark_client.im
         get_message_resource_result = self._lark_client.im.v1.message_resource.get(request)
         return get_message_resource_result
+    
     
     async def get_message_resource_async(
         self,
@@ -291,44 +307,119 @@ class LarkBot:
         return image_bytes_list
     
     
+    def _build_reply_message_request(
+        self,
+        response: str,
+        message_id: str,
+        reply_in_thread: bool,
+        image_keys: List[str],
+        hyperlinks: List[str],
+    )-> ReplyMessageRequest:
+        
+        image_count = response.count(self._image_placeholder)
+        assert image_count == len(image_keys), (
+            f"图片占位符数量 ({image_count}) "
+            f"与 image_keys 列表长度 ({len(image_keys)}) 不匹配"
+        )
+        link_begin_count = response.count(self._begin_of_hyperlink)
+        link_end_count = response.count(self._end_of_hyperlink)
+        assert link_begin_count == link_end_count, (
+            f"超链接开始标记 ({link_begin_count}) "
+            f"和结束标记 ({link_end_count}) 数量不匹配"
+        )
+        assert link_begin_count == len(hyperlinks), (
+            f"超链接标记数量 ({link_begin_count}) "
+            f"与 hyperlinks 列表长度 ({len(hyperlinks)}) 不匹配"
+        )
+
+        image_key_iter = iter(image_keys)
+        hyperlink_iter = iter(hyperlinks)
+        
+        image_pattern = f"({re.escape(self._image_placeholder)})"
+        hyperlink_pattern = (
+            f"({re.escape(self._begin_of_hyperlink)}"
+            f".*?"
+            f"{re.escape(self._end_of_hyperlink)})"
+        )
+        combined_pattern = re.compile(f"{image_pattern}|{hyperlink_pattern}")
+        line_elements_list: List[List[Dict[str, Any]]] = []
+        for content_line in response.split("\n"):
+            line_elements: List[Dict[str, Any]] = []
+            parts: List[str] = combined_pattern.split(content_line)
+            for part in parts:
+                if not part: continue
+                if part == self._image_placeholder:
+                    line_elements.append({
+                        "tag": "img",
+                        "image_key": next(image_key_iter)
+                    })
+                elif part.startswith(self._begin_of_hyperlink):
+                    start_len = len(self._begin_of_hyperlink)
+                    end_len = len(self._end_of_hyperlink)
+                    link_text = part[start_len:-end_len]
+                    line_elements.append({
+                        "tag": "a",
+                        "text": link_text,
+                        "href": next(hyperlink_iter)
+                    })
+                else:
+                    line_elements.append({
+                        "tag": "text",
+                        "text": part
+                    })
+            line_elements_list.append(line_elements)
+
+        post_i18n_content = {
+            "title": "", 
+            "content": line_elements_list
+        }
+        post_content_body = {
+            "zh_cn": post_i18n_content,
+            "en_us": post_i18n_content,
+        }
+        reply_content = serialize_json(post_content_body)
+        
+        request_body_builder = ReplyMessageRequestBody.builder()
+        request_body_builder = request_body_builder.content(reply_content)
+        request_body_builder = request_body_builder.msg_type("post")
+        request_body_builder = request_body_builder.reply_in_thread(reply_in_thread)
+        request_body = request_body_builder.build()
+        
+        request_builder = ReplyMessageRequest.builder()
+        request_builder = request_builder.request_body(request_body)
+        request_builder = request_builder.message_id(message_id)
+        request = request_builder.build()
+        
+        return request
+    
+    
     def reply_message(
         self,
         response: str,
         message_id: str,
         reply_in_thread: bool = False,
+        image_keys: List[str] = [],
+        hyperlinks: List[str] = [],
     )-> ReplyMessageResponse:
         
-        reply_content = serialize_json({"text": response})
-        request_body_builder = ReplyMessageRequestBody.builder()
-        request_body_builder = request_body_builder.content(reply_content)
-        request_body_builder = request_body_builder.msg_type("text")
-        request_body_builder = request_body_builder.reply_in_thread(reply_in_thread)
-        request_body = request_body_builder.build()
-        request_builder = ReplyMessageRequest.builder()
-        request_builder = request_builder.request_body(request_body)
-        request_builder = request_builder.message_id(message_id)
-        request = request_builder.build()
+        request = self._build_reply_message_request(response, message_id, reply_in_thread, 
+                                                    image_keys, hyperlinks)
         assert self._lark_client.im
         reply_message_result = self._lark_client.im.v1.message.reply(request)
         return reply_message_result
+    
     
     async def reply_message_async(
         self,
         response: str,
         message_id: str,
         reply_in_thread: bool = False,
+        image_keys: List[str] = [],
+        hyperlinks: List[str] = [],
     )-> ReplyMessageResponse:
         
-        reply_content = serialize_json({"text": response})
-        request_body_builder = ReplyMessageRequestBody.builder()
-        request_body_builder = request_body_builder.content(reply_content)
-        request_body_builder = request_body_builder.msg_type("text")
-        request_body_builder = request_body_builder.reply_in_thread(reply_in_thread)
-        request_body = request_body_builder.build()
-        request_builder = ReplyMessageRequest.builder()
-        request_builder = request_builder.request_body(request_body)
-        request_builder = request_builder.message_id(message_id)
-        request = request_builder.build()
+        request = self._build_reply_message_request(response, message_id, reply_in_thread, 
+                                                    image_keys, hyperlinks)
         assert self._lark_client.im
         reply_message_result = await self._lark_client.im.v1.message.areply(request)
         return reply_message_result
@@ -357,7 +448,8 @@ class LarkBot:
         assert self._lark_client.im
         create_message_result = self._lark_client.im.v1.message.create(request)
         return create_message_result
-
+    
+    
     async def send_message_async(
         self,
         receive_id_type: Literal["chat_id", "open_id", "user_id"],
@@ -410,6 +502,8 @@ class LarkBot:
             document = create_document_result.data.document
             assert document
             result["document_id"] = document.document_id
+        else:
+            raise RuntimeError
         return result
     
     @backoff_async(_create_document_backoff_seconds)
@@ -438,5 +532,109 @@ class LarkBot:
             document = create_document_result.data.document
             assert document
             result["document_id"] = document.document_id
+        else:
+            raise RuntimeError
         return result
     
+    
+    @backoff(_overwrite_document_backoff_seconds)
+    def overwrite_document(
+        self,
+        document_id: str,
+        text_elements: List[TextElement],
+    )-> None:
+        
+        document_root_block_id = document_id
+        assert self._lark_client.docx
+        
+        while True:
+            delete_body_builder = BatchDeleteDocumentBlockChildrenRequestBody.builder()
+            delete_body_builder = delete_body_builder.start_index(0)
+            delete_body_builder = delete_body_builder.end_index(1)
+            delete_request_body = delete_body_builder.build()
+            delete_request_builder = BatchDeleteDocumentBlockChildrenRequest.builder()
+            delete_request_builder = delete_request_builder.document_id(document_id)
+            delete_request_builder = delete_request_builder.block_id(document_root_block_id)
+            delete_request_builder = delete_request_builder.request_body(delete_request_body)
+            delete_request = delete_request_builder.build()
+            delete_response = self._lark_client.docx.v1.document_block_children.batch_delete(delete_request)
+            if not delete_response.success(): break
+        
+        text_builder = Text.builder()
+        text_builder = text_builder.elements(text_elements)
+        text = text_builder.build()
+        
+        text_block_type = 2
+        child_block_builder = Block.builder()
+        child_block_builder = child_block_builder.block_type(text_block_type)
+        child_block_builder = child_block_builder.text(text)
+        child_block = child_block_builder.build()
+
+        insert_body_builder = CreateDocumentBlockChildrenRequestBody.builder()
+        insert_body_builder = insert_body_builder.children([child_block])
+        insert_body_builder = insert_body_builder.index(0)
+        insert_request_body = insert_body_builder.build()
+
+        insert_request_builder = CreateDocumentBlockChildrenRequest.builder()
+        insert_request_builder = insert_request_builder.document_id(document_id)
+        insert_request_builder = insert_request_builder.block_id(document_root_block_id) 
+        insert_request_builder = insert_request_builder.request_body(insert_request_body)
+        insert_request = insert_request_builder.build()
+        
+        insert_response = self._lark_client.docx.v1.document_block_children.create(insert_request)
+        
+        if not insert_response.success():
+            raise RuntimeError(f"Failed to insert new blocks: {insert_response.code} {insert_response.msg}")
+
+        return None
+
+    @backoff_async(_overwrite_document_backoff_seconds)
+    async def overwrite_document_async(
+        self,
+        document_id: str,
+        text_elements: List[TextElement],
+    )-> None:
+        
+        document_root_block_id = document_id
+        assert self._lark_client.docx
+        
+        while True:
+            delete_body_builder = BatchDeleteDocumentBlockChildrenRequestBody.builder()
+            delete_body_builder = delete_body_builder.start_index(0)
+            delete_body_builder = delete_body_builder.end_index(1)
+            delete_request_body = delete_body_builder.build()
+            delete_request_builder = BatchDeleteDocumentBlockChildrenRequest.builder()
+            delete_request_builder = delete_request_builder.document_id(document_id)
+            delete_request_builder = delete_request_builder.block_id(document_root_block_id)
+            delete_request_builder = delete_request_builder.request_body(delete_request_body)
+            delete_request = delete_request_builder.build()
+            delete_response = await self._lark_client.docx.v1.document_block_children.abatch_delete(delete_request)
+            if not delete_response.success(): break
+        
+        text_builder = Text.builder()
+        text_builder = text_builder.elements(text_elements)
+        text = text_builder.build()
+        
+        text_block_type = 2
+        child_block_builder = Block.builder()
+        child_block_builder = child_block_builder.block_type(text_block_type)
+        child_block_builder = child_block_builder.text(text)
+        child_block = child_block_builder.build()
+
+        insert_body_builder = CreateDocumentBlockChildrenRequestBody.builder()
+        insert_body_builder = insert_body_builder.children([child_block])
+        insert_body_builder = insert_body_builder.index(0)
+        insert_request_body = insert_body_builder.build()
+
+        insert_request_builder = CreateDocumentBlockChildrenRequest.builder()
+        insert_request_builder = insert_request_builder.document_id(document_id)
+        insert_request_builder = insert_request_builder.block_id(document_root_block_id) 
+        insert_request_builder = insert_request_builder.request_body(insert_request_body)
+        insert_request = insert_request_builder.build()
+        
+        insert_response = await self._lark_client.docx.v1.document_block_children.acreate(insert_request)
+        
+        if not insert_response.success():
+            raise RuntimeError(f"Failed to insert new blocks: {insert_response.code} {insert_response.msg}")
+
+        return None

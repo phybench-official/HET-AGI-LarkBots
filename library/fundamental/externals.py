@@ -13,6 +13,7 @@ from functools import wraps
 from random import normalvariate
 from concurrent.futures import ThreadPoolExecutor
 from collections import OrderedDict
+from pywheels.miscellaneous import get_time_stamp
 from pywheels.llm_tools.get_answer import get_answer
 from pywheels.llm_tools.get_answer import get_answer_async
 from pywheels.task_runner.task_runner import run_tasks_concurrently
@@ -31,6 +32,7 @@ __all__ = [
     "asyncio",
     "traceback",
     "threading",
+    "get_time_stamp",
     "get_answer",
     "get_answer_async",
     "contextlib",
