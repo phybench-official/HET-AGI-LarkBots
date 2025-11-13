@@ -14,6 +14,8 @@ from lark_oapi.api.im.v1 import GetMessageResourceResponse
 from lark_oapi.api.im.v1 import CreateMessageRequest
 from lark_oapi.api.im.v1 import CreateMessageResponse
 from lark_oapi.api.im.v1 import CreateMessageRequestBody
+from lark_oapi.api.drive.v1 import DeleteFileRequest
+from lark_oapi.api.drive.v1 import DeleteFileResponse
 from lark_oapi.api.docx.v1 import CreateDocumentRequest
 from lark_oapi.api.docx.v1 import CreateDocumentResponse
 from lark_oapi.api.docx.v1 import CreateDocumentRequestBody
@@ -45,6 +47,8 @@ __all__ = [
     "CreateMessageRequest",
     "CreateMessageResponse",
     "CreateMessageRequestBody",
+    "DeleteFileRequest",
+    "DeleteFileResponse",
     "CreateDocumentRequest",
     "CreateDocumentResponse",
     "CreateDocumentRequestBody",

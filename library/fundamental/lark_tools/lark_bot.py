@@ -32,8 +32,9 @@ def get_lark_document_url(
     return lark_document_url
 
 
-_create_document_backoff_seconds = [1.0] * 32 + [2.0] * 32 + [4.0] * 32
-_overwrite_document_backoff_seconds = [1.0] * 32 + [2.0] * 32 + [4.0] * 32
+_create_document_backoff_seconds = [1.0] * 32 + [2.0] * 32 + [4.0] * 32 + [8.0] * 32
+_overwrite_document_backoff_seconds = [1.0] * 32 + [2.0] * 32 + [4.0] * 32 + [8.0] * 32
+_delete_file_backoff_seconds = [1.0] * 32 + [2.0] * 32 + [4.0] * 32 + [8.0] * 32
 
 
 class LarkBot:
@@ -578,7 +579,60 @@ class LarkBot:
             raise RuntimeError
         return result
     
-
+    
+    def _build_delete_file_request(
+        self,
+        file_token: str,
+        file_type: Literal["file", "docx", "sheet", "bitable", "folder"],
+    )-> DeleteFileRequest:
+        
+        request_builder = DeleteFileRequest.builder()
+        request_builder = request_builder.type(file_type)
+        request_builder = request_builder.file_token(file_token)
+        request = request_builder.build()
+        return request
+    
+    
+    @backoff(_delete_file_backoff_seconds)
+    def delete_file(
+        self,
+        file_token: str,
+        file_type: Literal["docx", "sheet", "bitable", "folder", "file"] = "docx",
+    )-> None:
+        
+        request = self._build_delete_file_request(
+            file_token = file_token,
+            file_type = file_type,
+        )
+        
+        assert self._lark_client.drive
+        delete_file_response = self._lark_client.drive.v1.file.delete(request)
+        if not delete_file_response.success():
+            raise RuntimeError
+        else:
+            return None
+    
+    
+    @backoff_async(_delete_file_backoff_seconds)
+    async def delete_file_async(
+        self,
+        file_token: str,
+        file_type: Literal["docx", "sheet", "bitable", "folder", "file"] = "docx",
+    )-> None:
+        
+        request = self._build_delete_file_request(
+            file_token = file_token,
+            file_type = file_type,
+        )
+        
+        assert self._lark_client.drive
+        delete_file_response = await self._lark_client.drive.v1.file.adelete(request)
+        if not delete_file_response.success():
+            raise RuntimeError
+        else:
+            return None
+    
+    
     @backoff_async(_overwrite_document_backoff_seconds)
     async def overwrite_document_async(
         self,

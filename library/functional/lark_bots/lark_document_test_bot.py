@@ -2,12 +2,12 @@ from ...fundamental import *
 
 
 __all__ = [
-    "DevelopHelperBot",
+    "LarkDocumentTestBot",
 ]
 
 
-class DevelopHelperBot(ParallelThreadLarkBot):
-
+class LarkDocumentTestBot(ParallelThreadLarkBot):
+    
     def __init__(
         self,
         lark_bot_name: str,
@@ -40,15 +40,15 @@ class DevelopHelperBot(ParallelThreadLarkBot):
                 if parsed_message["mentioned_me"]:
                     thread_root_id: Optional[str] = parsed_message["thread_root_id"]
                     assert thread_root_id
-                    print(f"[DevelopHelperBot] Root message {parsed_message['message_id']} accepted, adding to acceptance cache.")
+                    print(f"[LarkDocumentTestBot] Root message {parsed_message['message_id']} accepted, adding to acceptance cache.")
                     self._acceptance_cache[thread_root_id] = True
                     self._acceptance_cache.move_to_end(thread_root_id)
                     if len(self._acceptance_cache) > self._acceptance_cache_size:
                         evicted_key, _ = self._acceptance_cache.popitem(last=False)
-                        print(f"[DevelopHelperBot] Evicted {evicted_key} from acceptance cache.")
+                        print(f"[LarkDocumentTestBot] Evicted {evicted_key} from acceptance cache.")
                     return True
                 else:
-                    print(f"[DevelopHelperBot] Dropping root message {parsed_message['message_id']} (not mentioned).")
+                    print(f"[LarkDocumentTestBot] Dropping root message {parsed_message['message_id']} (not mentioned).")
                     return False
             else:
                 return True
@@ -63,7 +63,7 @@ class DevelopHelperBot(ParallelThreadLarkBot):
 
         is_accepted: bool = thread_root_id in self._acceptance_cache
         if not is_accepted:
-            print(f"[DevelopHelperBot] Thread {thread_root_id} not in acceptance cache. Ignoring.")
+            print(f"[LarkDocumentTestBot] Thread {thread_root_id} not in acceptance cache. Ignoring.")
 
         return {
             "is_accepted": is_accepted,
@@ -104,6 +104,34 @@ class DevelopHelperBot(ParallelThreadLarkBot):
             
             print(f" -> [Worker] 收到任务: {text}，开始处理")
             
+            if text == "删除此文档":
+                if context["document_id"] is not None:
+                    try:
+                        await self.delete_file_async(
+                            file_token = context["document_id"],
+                        )
+                    except:
+                        await self.reply_message_async(
+                            response = "文档删除失败...",
+                            message_id = message_id,
+                            reply_in_thread = True,
+                        )
+                        return context
+                    await self.reply_message_async(
+                        response = "文档已删除~",
+                        message_id = message_id,
+                        reply_in_thread = True,
+                    )
+                    context["document_id"] = None
+                    return context
+                else:
+                    await self.reply_message_async(
+                        response = "当前话题下暂无文档，请先创建文档~",
+                        message_id = message_id,
+                        reply_in_thread = True,
+                    )
+                    return context
+            
             text = text.replace(self._begin_of_hyperlink, "")
             text = text.replace(self._end_of_hyperlink, "")
             
@@ -116,7 +144,7 @@ class DevelopHelperBot(ParallelThreadLarkBot):
                     folder_token = self._eureka_lab_bot_file_root,
                 )
                 if not create_document_result["success"]:
-                    print("[DevelopHelperBot] 获取文档失败")
+                    print("[LarkDocumentTestBot] 获取文档失败")
                     return context
                 document_id = create_document_result["document_id"]
                 assert document_id is not None
@@ -147,7 +175,7 @@ class DevelopHelperBot(ParallelThreadLarkBot):
                     text_elements = [text_element],
                 )
             except:
-                print("[DevelopHelperBot] 更新文档失败")
+                print("[LarkDocumentTestBot] 更新文档失败")
                 return context
             
             if on_creation:
@@ -169,7 +197,7 @@ class DevelopHelperBot(ParallelThreadLarkBot):
         
         except Exception as error:
             print(
-                f"[DevelopHelperBot] Error during processing message: {error}\n"
+                f"[LarkDocumentTestBot] Error during processing message: {error}\n"
                 f"{traceback.format_exc()}"
             )
         
