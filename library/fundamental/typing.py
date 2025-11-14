@@ -9,6 +9,7 @@ from typing import Literal
 from typing import Callable
 from typing import Optional
 from typing import Awaitable
+from typing import Coroutine
 
 
 __all__ = [
@@ -23,4 +24,5 @@ __all__ = [
     "Callable",
     "Optional",
     "Awaitable",
+    "Coroutine",
 ]

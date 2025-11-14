@@ -1,13 +1,4 @@
 import lark_oapi as lark
-from lark_oapi.api.docx.v1 import Text
-from lark_oapi.api.docx.v1 import Block
-from lark_oapi.api.docx.v1 import Image
-from lark_oapi.api.docx.v1 import Divider
-from lark_oapi.api.docx.v1 import TextRun
-from lark_oapi.api.docx.v1 import Equation
-from lark_oapi.api.docx.v1 import TextElement
-from lark_oapi.api.docx.v1 import UpdateTextRequest
-from lark_oapi.api.docx.v1 import UpdateBlockRequest
 from lark_oapi.api.im.v1 import P2ImMessageReceiveV1
 from lark_oapi.api.im.v1 import ReplyMessageRequest
 from lark_oapi.api.im.v1 import ReplyMessageResponse
@@ -25,6 +16,16 @@ from lark_oapi.api.drive.v1 import DeleteFileResponse
 from lark_oapi.api.drive.v1 import UploadAllMediaRequest
 from lark_oapi.api.drive.v1 import UploadAllMediaRequestBody
 from lark_oapi.api.drive.v1 import UploadAllMediaResponse
+from lark_oapi.api.docx.v1 import Text
+from lark_oapi.api.docx.v1 import Block
+from lark_oapi.api.docx.v1 import Image
+from lark_oapi.api.docx.v1 import Divider
+from lark_oapi.api.docx.v1 import TextRun
+from lark_oapi.api.docx.v1 import Equation
+from lark_oapi.api.docx.v1 import TextElement
+from lark_oapi.api.docx.v1 import UpdateTextRequest
+from lark_oapi.api.docx.v1 import UpdateBlockRequest
+from lark_oapi.api.docx.v1 import ReplaceImageRequest
 from lark_oapi.api.docx.v1 import CreateDocumentRequest
 from lark_oapi.api.docx.v1 import CreateDocumentResponse
 from lark_oapi.api.docx.v1 import CreateDocumentRequestBody
@@ -40,16 +41,6 @@ from lark_oapi.api.docx.v1 import BatchDeleteDocumentBlockChildrenRequestBody
 
 
 __all__ = [
-    "lark",
-    "Text",
-    "Block",
-    "Image",
-    "Divider",
-    "TextRun",
-    "Equation",
-    "TextElement",
-    "UpdateTextRequest",
-    "UpdateBlockRequest",
     "P2ImMessageReceiveV1",
     "ReplyMessageRequest",
     "ReplyMessageResponse",
@@ -67,6 +58,17 @@ __all__ = [
     "UploadAllMediaRequest",
     "UploadAllMediaRequestBody",
     "UploadAllMediaResponse",
+    "lark",
+    "Text",
+    "Block",
+    "Image",
+    "Divider",
+    "TextRun",
+    "Equation",
+    "TextElement",
+    "UpdateTextRequest",
+    "UpdateBlockRequest",
+    "ReplaceImageRequest",
     "CreateDocumentRequest",
     "CreateDocumentResponse",
     "CreateDocumentRequestBody",

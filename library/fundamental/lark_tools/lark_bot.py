@@ -837,6 +837,7 @@ class LarkBot:
         self,
         image: bytes,
         document_id: str,
+        block_id: str,
     )-> UploadAllMediaRequest:
         
         request_body_builder = UploadAllMediaRequestBody.builder()
@@ -845,7 +846,7 @@ class LarkBot:
             f"{get_time_stamp(show_minute=True, show_second=True)}.png"
         )
         request_body_builder = request_body_builder.size(len(image))
-        request_body_builder = request_body_builder.parent_node(document_id) # ？这对吗
+        request_body_builder = request_body_builder.parent_node(block_id)
         request_body_builder = request_body_builder.parent_type("docx_image")
         request_body_builder = request_body_builder.extra(
             serialize_json({"drive_route_token": document_id})
@@ -863,36 +864,17 @@ class LarkBot:
         self,
         image: Any,
         document_id: str,
+        block_id: str,
     )-> str:
         
         image = align_image_to_bytes(image)
         request = self._build_upload_image_for_document_request(
             image = image,
             document_id = document_id,
+            block_id = block_id,
         )
         assert self._lark_client.drive
         create_image_result = self._lark_client.drive.v1.media.upload_all(request)
-        if not create_image_result.success():
-            raise RuntimeError
-        else:
-            assert create_image_result.data
-            assert create_image_result.data.file_token
-            return create_image_result.data.file_token
-    
-       
-    async def upload_image_for_document_async(
-        self,
-        image: Any,
-        document_id: str,
-    )-> str:
-        
-        image = await align_image_to_bytes_async(image)
-        request = self._build_upload_image_for_document_request(
-            image = image,
-            document_id = document_id,
-        )
-        assert self._lark_client.drive
-        create_image_result = await self._lark_client.drive.v1.media.aupload_all(request)
         if not create_image_result.success():
             raise RuntimeError
         else:
@@ -922,7 +904,7 @@ class LarkBot:
         
         if not elements:
             elements = [TextElement.builder().text_run(TextRun.builder().content("").build()).build()]
-            
+        
         return elements
     
     
@@ -963,13 +945,20 @@ class LarkBot:
             raise NotImplementedError
 
     
+    # 幽默飞书，先传空块、再对块传素材、再更新云素材至块，这逻辑诗人握持
     def build_image_block(
         self,
-        image_key: str,
+        image_key: Optional[str] = None,
     )-> Block:
         
-        image = Image.builder().token(image_key).build()
-        block = Block.builder().block_type(self.image_block_type).block_id("").image(image).build()
+        image_builder = Image.builder()
+        if image_key: image_builder = image_builder.token(image_key)
+        image = image_builder.build()
+        
+        block_builder = Block.builder()
+        block_builder = block_builder.block_type(self.image_block_type)
+        block_builder = block_builder.image(image)
+        block = block_builder.build()
         return block
     
     
@@ -985,10 +974,8 @@ class LarkBot:
     def build_document_blocks(
         self,
         content: str,
-        image_keys: List[str] = [],
     )-> List[Block]:
         
-        image_key_iter = iter(image_keys)
         blocks: List[Block] = []
         
         parts: List[str] = self._document_blocks_pattern.split(content)
@@ -996,12 +983,7 @@ class LarkBot:
             if not part: continue
             # image
             if part == self.image_placeholder:
-                try:
-                    key = next(image_key_iter)
-                    blocks.append(self.build_image_block(key))
-                except StopIteration:
-                    print(f"[LarkBot] 警告: 发现图片占位符，但 image_keys 已耗尽")
-                    blocks.append(self.build_text_block("[图片加载失败]"))
+                blocks.append(self.build_image_block())
             elif part == self.divider_placeholder:
                 blocks.append(self.build_divider_block())
             # H1 title
@@ -1023,11 +1005,75 @@ class LarkBot:
         return blocks
     
     
+    async def upload_image_for_document_async(
+        self,
+        image: Any,
+        document_id: str,
+        block_id: str,
+    )-> str:
+        
+        image = await align_image_to_bytes_async(image)
+        request = self._build_upload_image_for_document_request(
+            image = image,
+            document_id = document_id,
+            block_id = block_id,
+        )
+        assert self._lark_client.drive
+        create_image_result = await self._lark_client.drive.v1.media.aupload_all(request)
+        if not create_image_result.success():
+            raise RuntimeError
+        else:
+            assert create_image_result.data
+            assert create_image_result.data.file_token
+            return create_image_result.data.file_token
+    
+    
+    async def _upload_and_update_image_block_async(
+        self,
+        document_id: str,
+        block_id: str,
+        image_bytes: bytes,
+    )-> None:
+
+        image_token: str = await self.upload_image_for_document_async(
+            image = image_bytes,
+            document_id = document_id,
+            block_id = block_id,
+        )
+        
+        request_builder = ReplaceImageRequest.builder()
+        request_builder = request_builder.token(image_token)
+        request = request_builder.build()
+        
+        request_builder = UpdateBlockRequest.builder()
+        request_builder = request_builder.block_id(block_id)
+        request_builder = request_builder.replace_image(request)
+        request = request_builder.build()
+        
+        request_body_builder = BatchUpdateDocumentBlockRequestBody.builder()
+        request_body_builder = request_body_builder.requests([request])
+        request_body = request_body_builder.build()
+        
+        request_builder = BatchUpdateDocumentBlockRequest.builder()
+        request_builder = request_builder.document_id(document_id)
+        request_builder = request_builder.request_body(request_body)
+        request = request_builder.build()
+        
+        assert self._lark_client.docx
+        update_response = await self._lark_client.docx.v1.document_block.abatch_update(request)
+        
+        if not update_response.success(): 
+            print(f"[LarkBot] Failed to update image block {block_id} "
+                  f"with token {image_token}: {update_response.code} {update_response.msg}")
+            raise RuntimeError
+    
+    
     @backoff_async(overwrite_document_backoff_seconds)
     async def overwrite_document_async(
         self,
         document_id: str,
         blocks: List[Block],
+        images: List[bytes],
     )-> None:
         
         document_root_block_id = document_id
@@ -1062,6 +1108,32 @@ class LarkBot:
         
         if not insert_response.success():
             raise RuntimeError(f"Failed to insert new blocks: {insert_response.code} {insert_response.msg}")
+        
+        assert insert_response.data
+        assert insert_response.data.children
+        created_blocks: List[Block] = insert_response.data.children
+
+        image_block_ids: List[str] = []
+        for block in created_blocks:
+            if block.block_type == self.image_block_type:
+                assert block.block_id is not None
+                image_block_ids.append(block.block_id)
+
+        if len(image_block_ids) != len(images):
+            print(
+                f"[LarkBot] 警告: 文档中创建了 {len(image_block_ids)} 个图片块, "
+                f"但只提供了 {len(images)} 张图片。将只填充前面的图片。"
+            )
+        
+        upload_tasks: List[Coroutine[Any, Any, None]] = []
+        for block_id, image_bytes in zip(image_block_ids, images):
+            task = self._upload_and_update_image_block_async(
+                document_id = document_id,
+                block_id = block_id,
+                image_bytes = image_bytes
+            )
+            upload_tasks.append(task)
+        if upload_tasks: await asyncio.gather(*upload_tasks)
 
         return None
     
