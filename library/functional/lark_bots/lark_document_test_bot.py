@@ -141,14 +141,14 @@ class LarkDocumentTestBot(ParallelThreadLarkBot):
             if document_id is None:
                 on_creation = True
                 document_title = f"测试文档-{get_time_stamp(show_minute=True, show_second=True)}"
-                create_document_result = await self.create_document_async(
-                    title = document_title,
-                    folder_token = self._eureka_lab_bot_file_root,
-                )
-                if not create_document_result["success"]:
-                    print("[LarkDocumentTestBot] 获取文档失败")
+                try:
+                    document_id = await self.create_document_async(
+                        title = document_title,
+                        folder_token = self._eureka_lab_bot_file_root,
+                    )
+                except:
+                    print("[LarkDocumentTestBot] 创建文档失败")
                     return context
-                document_id = create_document_result["document_id"]
                 assert document_id is not None
                 document_url = get_lark_document_url(
                     tenant = self._PKU_alumni_association,
@@ -168,20 +168,25 @@ class LarkDocumentTestBot(ParallelThreadLarkBot):
             content = ""
             content += f"{self.begin_of_third_heading}你刚刚新发的内容{self.end_of_third_heading}"
             content += text
+            content += self.divider_placeholder
             content += f"{self.begin_of_third_heading}云文档图片上传展示{self.end_of_third_heading}"
-            content += self.image_placeholder
-            content += f"{self.begin_of_third_heading}云文档公式渲染展示{self.end_of_third_heading}"
-#             content += f"""这是一个行内公式：{self.begin_of_equation}\\sqrt{{2}}\\ne\\frac{{p}}{{q}}{self.end_of_equation}，它在行内
-# {self.begin_of_equation}\\boxed{{2^x+1=3^y, x, y \\in \\mathbb{{N}}^* \\Rightarrow (x,y)=(1,1) \\text{{ or }} (x,y)=(3,2)}}{self.end_of_equation}
-# {self.begin_of_equation}(M^{-1})^\\dagger = \\left[ \\exp\\left(\\frac{{i}}{{2}} \\omega_{{\\mu\\nu}} \\sigma^{{\\mu\\nu}}\\right) \\right]^\\dagger = \\exp\\left( -\\frac{{i}}{{2}} \\omega_{{\\mu\\nu}} (\\sigma^{{\\mu\\nu}})^\\dagger \\right){self.end_of_equation}
-# """
+            # content += self.image_placeholder
             content += "WIP."
+            content += self.divider_placeholder
+            content += f"{self.begin_of_third_heading}云文档公式渲染展示{self.end_of_third_heading}"
+            content += f"""这是一个行内公式：{self.begin_of_equation}\\sqrt{{2}}\\ne\\frac{{p}}{{q}}{self.end_of_equation}，它在行内
+{self.begin_of_equation}\\boxed{{2^x+1=3^y, x, y \\in \\mathbb{{N}}^* \\Rightarrow (x,y)=(1,1) \\text{{ or }} (x,y)=(3,2)}}{self.end_of_equation}
+{self.begin_of_equation}(M^{{-1}})^\\dagger = \\left[ \\exp\\left(\\frac{{i}}{{2}} \\omega_{{\\mu\\nu}} \\sigma^{{\\mu\\nu}}\\right) \\right]^\\dagger = \\exp\\left( -\\frac{{i}}{{2}} \\omega_{{\\mu\\nu}} (\\sigma^{{\\mu\\nu}})^\\dagger \\right){self.end_of_equation}"""           
+            
+            blocks = self.build_document_blocks(
+                content = content,
+                # image_keys = [self._uploaded_test_image_key],
+            )
 
             try:
                 await self.overwrite_document_async(
                     document_id = document_id,
-                    content = content,
-                    image_keys = [self._uploaded_test_image_key],
+                    blocks = blocks,
                 )
             except:
                 print("[LarkDocumentTestBot] 更新文档失败")

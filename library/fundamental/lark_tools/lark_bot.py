@@ -32,27 +32,28 @@ def get_lark_document_url(
     return lark_document_url
 
 
-never_used_string = f"1145141919810_{get_time_stamp(show_minute=True, show_second=True)}"
+never_used_string = f"114514_{get_time_stamp(show_minute=True, show_second=True)}"
 class LarkBot:
     
     text_block_type = 2
     first_heading_block_type = 3
     second_heading_block_type = 4
     third_heading_block_type = 5
-    equation_block_type = 16
+    divider_block_type = 22
     image_block_type = 27
     
-    image_placeholder = f"<image_never_used_{never_used_string}>"
-    begin_of_hyperlink = f"<hyperlink_never_used_{never_used_string}>"
-    end_of_hyperlink = f"</hyperlink_never_used_{never_used_string}>"
-    begin_of_equation = f"<equation_never_used_{never_used_string}>"
-    end_of_equation = f"</equation_never_used_{never_used_string}>"
-    begin_of_first_heading = f"<first_heading_never_used_{never_used_string}>"
-    end_of_first_heading = f"</first_heading_never_used_{never_used_string}>"
-    begin_of_second_heading = f"<second_heading_never_used_{never_used_string}>"
-    end_of_second_heading = f"</second_heading_never_used_{never_used_string}>"
-    begin_of_third_heading = f"<third_heading_never_used_{never_used_string}>"
-    end_of_third_heading = f"</third_heading_never_used_{never_used_string}>"
+    image_placeholder = f"<image_{never_used_string}>"
+    divider_placeholder = f"<divider_{never_used_string}>"
+    begin_of_hyperlink = f"<hyperlink_{never_used_string}>"
+    end_of_hyperlink = f"</hyperlink_{never_used_string}>"
+    begin_of_equation = f"<equation_{never_used_string}>"
+    end_of_equation = f"</equation_{never_used_string}>"
+    begin_of_first_heading = f"<first_heading_{never_used_string}>"
+    end_of_first_heading = f"</first_heading_{never_used_string}>"
+    begin_of_second_heading = f"<second_heading_{never_used_string}>"
+    end_of_second_heading = f"</second_heading_{never_used_string}>"
+    begin_of_third_heading = f"<third_heading_{never_used_string}>"
+    end_of_third_heading = f"</third_heading_{never_used_string}>"
     
     create_document_backoff_seconds = [1.0] * 32 + [2.0] * 32 + [4.0] * 32 + [8.0] * 32
     overwrite_document_backoff_seconds = [1.0] * 32 + [2.0] * 32 + [4.0] * 32 + [8.0] * 32
@@ -81,9 +82,33 @@ class LarkBot:
             level = lark.LogLevel.DEBUG
         )
         
-        
+        self._text_elements_pattern = re.compile((
+            f"({re.escape(self.begin_of_equation)}"
+            f".*?"
+            f"{re.escape(self.end_of_equation)})"
+        ))
+        img_pattern = f"({re.escape(self.image_placeholder)})"
+        divider_pattern = f"({re.escape(self.divider_placeholder)})"
+        h1_pattern = (
+            f"({re.escape(self.begin_of_first_heading)}"
+            f".*?"
+            f"{re.escape(self.end_of_first_heading)})"
+        )
+        h2_pattern = (
+            f"({re.escape(self.begin_of_second_heading)}"
+            f".*?"
+            f"{re.escape(self.end_of_second_heading)})"
+        )
+        h3_pattern = (
+            f"({re.escape(self.begin_of_third_heading)}"
+            f".*?"
+            f"{re.escape(self.end_of_third_heading)})"
+        )
+        self._document_blocks_pattern = re.compile(
+            f"{img_pattern}|{divider_pattern}|{h1_pattern}|{h2_pattern}|{h3_pattern}"
+        )
     
-    
+
     def register_message_receive(
         self,
         handler: Callable[[P2ImMessageReceiveV1], None],
@@ -548,7 +573,7 @@ class LarkBot:
         self,
         title: str,
         folder_token: str,
-    )-> Dict[str, Any]:
+    )-> str:
         
         request = self._build_create_document_request(
             title = title,
@@ -556,17 +581,13 @@ class LarkBot:
         )
         assert self._lark_client.docx
         create_document_result = self._lark_client.docx.v1.document.create(request)
-        result: Dict[str, Any] = {
-            "success": create_document_result.success(),
-        }
-        if result["success"]:
+        if create_document_result.success():
             assert create_document_result.data
-            document = create_document_result.data.document
-            assert document
-            result["document_id"] = document.document_id
+            assert create_document_result.data.document
+            assert create_document_result.data.document.document_id
+            return create_document_result.data.document.document_id
         else:
             raise RuntimeError
-        return result
     
     
     @backoff_async(create_document_backoff_seconds)
@@ -574,7 +595,7 @@ class LarkBot:
         self,
         title: str,
         folder_token: str,
-    )-> Dict[str, Any]:
+    )-> str:
         
         request = self._build_create_document_request(
             title = title,
@@ -582,40 +603,64 @@ class LarkBot:
         )
         assert self._lark_client.docx
         create_document_result = await self._lark_client.docx.v1.document.acreate(request)
-        result: Dict[str, Any] = {
-            "success": create_document_result.success(),
-        }
-        if result["success"]:
+        if create_document_result.success():
             assert create_document_result.data
-            document = create_document_result.data.document
-            assert document
-            result["document_id"] = document.document_id
+            assert create_document_result.data.document
+            assert create_document_result.data.document.document_id
+            return create_document_result.data.document.document_id
         else:
             raise RuntimeError
-        return result
     
     
-    def _build_text_block(
+    def build_text_elements(
+        self,
+        content: str,
+    )-> List[TextElement]:
+        
+        elements: List[TextElement] = []
+        parts: List[str] = self._text_elements_pattern.split(content)
+        for part in parts:
+            if not part: continue
+            if part.startswith(self.begin_of_equation):
+                eq_content = part[len(self.begin_of_equation):-len(self.end_of_equation)]
+                equation = Equation.builder().content(eq_content).build()
+                text_element = TextElement.builder().equation(equation).build()
+                elements.append(text_element)
+            else:
+                text_run = TextRun.builder().content(part).build()
+                text_element = TextElement.builder().text_run(text_run).build()
+                elements.append(text_element)
+        
+        if not elements:
+            elements = [TextElement.builder().text_run(TextRun.builder().content("").build()).build()]
+            
+        return elements
+    
+    
+    def build_text_block(
         self,
         content: str,
     )-> Block:
         
-        text_run = TextRun.builder().content(content).build()
-        text_element = TextElement.builder().text_run(text_run).build()
-        text = Text.builder().elements([text_element]).build()
+        elements = self.build_text_elements(
+            content = content,
+        )
+        
+        text = Text.builder().elements(elements).build()
         block = Block.builder().block_type(self.text_block_type).text(text).build()
         return block
 
     
-    def _build_heading_block(
+    def build_heading_block(
         self,
         content: str,
         level: int,
     )-> Block:
         
-        text_run = TextRun.builder().content(content).build()
-        text_element = TextElement.builder().text_run(text_run).build()
-        text = Text.builder().elements([text_element]).build()
+        elements = self.build_text_elements(
+            content = content,
+        )
+        text = Text.builder().elements(elements).build()
         if level == 1:
             block = Block.builder().block_type(self.first_heading_block_type).heading1(text).build()
             return block
@@ -628,20 +673,8 @@ class LarkBot:
         else:
             raise NotImplementedError
 
-
-    def _build_equation_block(
-        self,
-        content: str,
-    )-> Block:
-        
-        equation = Equation.builder().content(content).build()
-        text_element = TextElement.builder().equation(equation).build()
-        text = Text.builder().elements([text_element]).build()
-        block = Block.builder().block_type(self.equation_block_type).equation(text).build()
-        return block
     
-    
-    def _build_image_block(
+    def build_image_block(
         self,
         image_key: str,
     )-> Block:
@@ -651,78 +684,53 @@ class LarkBot:
         return block
     
     
+    def build_divider_block(
+        self,
+    )-> Block:
+        
+        divider = Divider.builder().build()
+        block = Block.builder().block_type(self.divider_block_type).divider(divider).build()
+        return block
+    
+    
     def build_document_blocks(
         self,
         content: str,
-        image_keys: List[str],
+        image_keys: List[str] = [],
     )-> List[Block]:
         
         image_key_iter = iter(image_keys)
         blocks: List[Block] = []
-
-        # (img)
-        img_pattern = f"({re.escape(self.image_placeholder)})"
-        # (h1)
-        h1_pattern = (
-            f"({re.escape(self.begin_of_first_heading)}"
-            f".*?"
-            f"{re.escape(self.end_of_first_heading)})"
-        )
-        # (h2)
-        h2_pattern = (
-            f"({re.escape(self.begin_of_second_heading)}"
-            f".*?"
-            f"{re.escape(self.end_of_second_heading)})"
-        )
-        # (h3)
-        h3_pattern = (
-            f"({re.escape(self.begin_of_third_heading)}"
-            f".*?"
-            f"{re.escape(self.end_of_third_heading)})"
-        )
-        # (eq)
-        eq_pattern = (
-            f"({re.escape(self.begin_of_equation)}"
-            f".*?"
-            f"{re.escape(self.end_of_equation)})"
-        )
         
-        combined_pattern = re.compile(
-            f"{img_pattern}|{h1_pattern}|{h2_pattern}|{h3_pattern}|{eq_pattern}"
-        )
-        
-        # 使用 re.split() 切割字符串，保留所有匹配到的占位符
-        parts: List[str] = combined_pattern.split(content)
-        
+        parts: List[str] = self._document_blocks_pattern.split(content)
         for part in parts:
             if not part: continue
-            # image block
+            # image
             if part == self.image_placeholder:
                 try:
                     key = next(image_key_iter)
-                    blocks.append(self._build_image_block(key))
+                    blocks.append(self.build_image_block(key))
                 except StopIteration:
                     print(f"[LarkBot] 警告: 发现图片占位符，但 image_keys 已耗尽")
-                    blocks.append(self._build_text_block("[图片加载失败]"))
-            # H1 title block
+                    blocks.append(self.build_text_block("[图片加载失败]"))
+            elif part == self.divider_placeholder:
+                print("发现分隔线")
+                blocks.append(self.build_divider_block())
+            # H1 title
             elif part.startswith(self.begin_of_first_heading):
                 text = part[len(self.begin_of_first_heading):-len(self.end_of_first_heading)]
-                blocks.append(self._build_heading_block(text, level=1))
-            # H2 title block  
+                blocks.append(self.build_heading_block(text, level=1))
+            # H2 title
             elif part.startswith(self.begin_of_second_heading):
                 text = part[len(self.begin_of_second_heading):-len(self.end_of_second_heading)]
-                blocks.append(self._build_heading_block(text, level=2))
-            # H3 title block
+                blocks.append(self.build_heading_block(text, level=2))
+            # H3 title
             elif part.startswith(self.begin_of_third_heading):
                 text = part[len(self.begin_of_third_heading):-len(self.end_of_third_heading)]
-                blocks.append(self._build_heading_block(text, level=3))
-            # equation block
-            elif part.startswith(self.begin_of_equation):
-                text = part[len(self.begin_of_equation):-len(self.end_of_equation)]
-                blocks.append(self._build_equation_block(text))
-            # text block
+                blocks.append(self.build_heading_block(text, level=3))
+            # text (possibly including equations)
             else:
-                blocks.append(self._build_text_block(part))
+                blocks.append(self.build_text_block(part))
         
         return blocks
     
@@ -731,8 +739,7 @@ class LarkBot:
     async def overwrite_document_async(
         self,
         document_id: str,
-        content: str,
-        image_keys: List[str] = [],
+        blocks: List[Block],
     )-> None:
         
         document_root_block_id = document_id
@@ -741,7 +748,7 @@ class LarkBot:
         while True:
             delete_body_builder = BatchDeleteDocumentBlockChildrenRequestBody.builder()
             delete_body_builder = delete_body_builder.start_index(0)
-            delete_body_builder = delete_body_builder.end_index(1)
+            delete_body_builder = delete_body_builder.end_index(500)
             delete_request_body = delete_body_builder.build()
             delete_request_builder = BatchDeleteDocumentBlockChildrenRequest.builder()
             delete_request_builder = delete_request_builder.document_id(document_id)
@@ -751,10 +758,6 @@ class LarkBot:
             delete_response = await self._lark_client.docx.v1.document_block_children.abatch_delete(delete_request)
             if not delete_response.success(): break
         
-        blocks = self.build_document_blocks(
-            content = content,
-            image_keys = image_keys,
-        )
         if not blocks: return None
         insert_body_builder = CreateDocumentBlockChildrenRequestBody.builder()
         insert_body_builder = insert_body_builder.children(blocks)

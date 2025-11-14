@@ -2,6 +2,7 @@ import lark_oapi as lark
 from lark_oapi.api.docx.v1 import Text
 from lark_oapi.api.docx.v1 import Block
 from lark_oapi.api.docx.v1 import Image
+from lark_oapi.api.docx.v1 import Divider
 from lark_oapi.api.docx.v1 import TextRun
 from lark_oapi.api.docx.v1 import Equation
 from lark_oapi.api.docx.v1 import TextElement
@@ -40,6 +41,7 @@ __all__ = [
     "Text",
     "Block",
     "Image",
+    "Divider",
     "TextRun",
     "Equation",
     "TextElement",
