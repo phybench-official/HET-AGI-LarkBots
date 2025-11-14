@@ -14,13 +14,14 @@ __all__ = [
 
 def get_lark_bot_token(
     lark_bot_name: str,
-)-> Tuple[str, str, str]:
+)-> Tuple[str, str, str, str]:
     
     app_token_dict = load_from_json("lark_api_keys.json")
     app_id = app_token_dict[lark_bot_name]["app_id"]
     app_secret = app_token_dict[lark_bot_name]["app_secret"]
     open_id = app_token_dict[lark_bot_name]["open_id"]
-    return app_id, app_secret, open_id
+    bot_name = app_token_dict[lark_bot_name]["bot_name"]
+    return app_id, app_secret, open_id, bot_name
 
 
 def get_lark_document_url(
@@ -64,11 +65,12 @@ class LarkBot:
         lark_bot_name: str,
     )-> None:
         
-        app_id, app_secret, open_id = get_lark_bot_token(lark_bot_name)
+        app_id, app_secret, open_id, bot_name = get_lark_bot_token(lark_bot_name)
         self._name = lark_bot_name
         self._app_id = app_id
         self._app_secret = app_secret
         self._open_id = open_id
+        self._bot_name = bot_name
         
         lark_client_builder = lark.Client.builder()
         lark_client_builder = lark_client_builder.app_id(app_id)

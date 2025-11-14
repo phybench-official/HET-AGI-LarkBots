@@ -168,6 +168,7 @@ class ParallelThreadLarkBot(LarkBot):
 
     def start(
         self,
+        block: bool = False,
     )-> None:
         
         self._async_loop = asyncio.new_event_loop()
@@ -178,14 +179,37 @@ class ParallelThreadLarkBot(LarkBot):
             args = (self._async_loop, ready_event),
             daemon = True,
         )
-        self._async_thread.start()
-        ready_event.wait()
-        print(f"[ParallelThreadLarkBot] Async worker thread started and loop is running.")
-        print(f"[ParallelThreadLarkBot] Starting synchronous Lark WS client on MainThread...")
-        super().start()
+        
+        # 关键修改：不要在这里启动 _async_thread
+        # self._async_thread.start() 
+        # ready_event.wait()
+        
+        if block:
+            print(f"[ParallelThreadLarkBot] Starting synchronous Lark WS client (blocking)...")
+            
+            # 在 lark.ws.Client 启动并阻塞 *之前* 的瞬间，启动我们的异步循环
+            self._async_thread.start()
+            ready_event.wait()
+            print(f"[ParallelThreadLarkBot] Async worker thread started.")
+            
+            super().start() # 此调用会阻塞
+            print(f"[ParallelThreadLarkBot] {self._name} WS client shut down.")
+        else:
+            print(f"[ParallelThreadLarkBot] Starting synchronous Lark WS client (non-blocking)...")
+            self._ws_thread = threading.Thread(
+                target = super().start,
+                daemon = True,
+            )
+            
+            # 同时启动 WS 线程和 异步 线程
+            self._async_thread.start()
+            self._ws_thread.start()
+            
+            ready_event.wait() # 等待异步循环就绪
+            print(f"[ParallelThreadLarkBot] {self._name} Async worker and WS client threads started.")
     
     # ------------------ 业务逻辑钩子 ------------------
-
+    
     def should_process(
         self,
         parsed_message: Dict[str, Any],

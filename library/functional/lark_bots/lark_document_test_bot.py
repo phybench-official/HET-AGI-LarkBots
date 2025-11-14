@@ -26,7 +26,7 @@ class LarkDocumentTestBot(ParallelThreadLarkBot):
         self._acceptance_cache_size: int = context_cache_size
         self._acceptance_cache: OrderedDict[str, bool] = OrderedDict()
         
-        self._mention_me_text = "@做题家"
+        self._mention_me_text = f"@{self._bot_name}"
         self._PKU_alumni_association = "lcnt4qemj6yx"
         self._eureka_lab_bot_file_root = "AqFDfBPoRlFaREdcWPecbO6SnKe"
         self._uploaded_test_image_key = "img_v3_02s0_9c0670aa-5608-4bba-9ab0-1c89ab9478fg"

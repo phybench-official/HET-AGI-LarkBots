@@ -1,4 +1,5 @@
 import io
+import os
 import re
 import json
 import time
@@ -7,6 +8,7 @@ import asyncio
 import traceback
 import threading
 import contextlib
+import multiprocessing
 from time import sleep
 from copy import deepcopy
 from functools import wraps
@@ -22,6 +24,7 @@ from pywheels.task_runner.task_runner import run_tasks_concurrently_async
 
 __all__ = [
     "io",
+    "os",
     "re",
     "json",
     "time",
@@ -32,6 +35,7 @@ __all__ = [
     "asyncio",
     "traceback",
     "threading",
+    "multiprocessing",
     "get_time_stamp",
     "get_answer",
     "get_answer_async",

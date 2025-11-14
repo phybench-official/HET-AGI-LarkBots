@@ -50,7 +50,7 @@ class ProblemSolverBot(ParallelThreadLarkBot):
         self,
         parsed_message: Dict[str, Any],
     )-> bool:
-
+        
         text: str = parsed_message.get("text", "")
         mentioned_me: bool = parsed_message.get("mentioned_me", False)
 
