@@ -9,6 +9,8 @@ __all__ = [
     "get_lark_bot_token",
     "get_lark_document_url",
     "LarkBot",
+    "P2ImMessageReceiveV1",
+    "ReplyMessageResponse",
 ]
 
 
@@ -59,10 +61,17 @@ class LarkBot:
     overwrite_document_backoff_seconds = [1.0] * 32 + [2.0] * 32 + [4.0] * 32 + [8.0] * 32
     delete_file_backoff_seconds = [1.0] * 32 + [2.0] * 32 + [4.0] * 32 + [8.0] * 32
     
+    _spawned_processes: List[multiprocessing.Process] = []
+    _process_lock: threading.Lock = threading.Lock()
+    
     def __init__(
         self,
         lark_bot_name: str,
     )-> None:
+        
+        self._init_arguments: Dict[str, Any] = {
+            "lark_bot_name": lark_bot_name,
+        }
         
         app_id, app_secret, open_id = get_lark_bot_token(lark_bot_name)
         self._name = lark_bot_name
@@ -79,7 +88,7 @@ class LarkBot:
         self._event_handler_builder = lark.EventDispatcherHandler.builder(
             encrypt_key = "",
             verification_token = "",
-            level = lark.LogLevel.DEBUG
+            level = lark.LogLevel.DEBUG,
         )
         
         self._text_elements_pattern = re.compile((
@@ -108,19 +117,39 @@ class LarkBot:
             f"{img_pattern}|{divider_pattern}|{h1_pattern}|{h2_pattern}|{h3_pattern}"
         )
     
+    
+    @staticmethod
+    def _run_in_process(
+        bot_class: type,
+        init_args: Dict[str, Any],
+    )-> None:
+        """
+        [静态方法] 此方法在独立的子进程中执行。
+        它重新实例化 Bot，并调用其内部启动逻辑。
+        """
+        bot_name = init_args.get("lark_bot_name", "UnknownBot")
+        print(f"[Process-{os.getpid()}] Starting bot: {bot_name}")
+        
+        try:
+            bot_instance = bot_class(**init_args)
+            bot_instance._start_internal_logic()
+        except KeyboardInterrupt:
+            print(f"[Process-{os.getpid()}] Shutdown signal for {bot_name}")
+        except Exception as e:
+            print(f"[Process-{os.getpid()}] Bot {bot_name} crashed: {e}\n{traceback.format_exc()}")
+    
 
-    def register_message_receive(
-        self,
-        handler: Callable[[P2ImMessageReceiveV1], None],
+    def _start_internal_logic(
+        self
     )-> None:
+        """
+        [实例方法] 内部的、真正的机器人启动逻辑。
+        子类 (如 ParallelThreadLarkBot) 应该覆盖此方法以添加它们的特定逻辑
+        (例如，启动它们自己的异步工作线程)。
         
-        self._event_handler_builder.register_p2_im_message_receive_v1(handler)
-    
-    
-    def start(
-        self,
-    )-> None:
-        
+        这是 LarkBot 原始的 start() 方法的内容。
+        """
+        print(f"[LarkBot-{self._name}] Starting synchronous Lark WS client (blocking process)...")
         event_handler = self._event_handler_builder.build()
         lark.ws.Client(
             app_id = self._app_id,
@@ -128,6 +157,64 @@ class LarkBot:
             event_handler = event_handler,
             log_level = lark.LogLevel.DEBUG
         ).start()
+        print(f"[LarkBot-{self._name}] WS client shut down.")
+    
+    
+    def start(
+        self,
+        block: bool = False,
+    )-> None:
+        """
+        [主进程] 启动 Bot。
+        
+        启动器：此方法现在在子进程中启动 Bot 的实际工作负载，
+        以规避 lark.ws.Client 的全局状态限制。
+        
+        :param block: 
+          - False (默认): 启动子进程并立即返回 (非阻塞)。
+          - True: 启动子进程，然后阻塞主线程以等待 Ctrl+C。
+            收到 Ctrl+C 时，将终止所有已启动的 Bot 进程。
+        """
+        
+        proc = multiprocessing.Process(
+            target = self._run_in_process,
+            args = (
+                self.__class__,
+                self._init_arguments,
+            ),
+            daemon = True,
+        )
+
+        with self._process_lock:
+            self._spawned_processes.append(proc)
+        
+        proc.start()
+        print(f"[Main] Started process {proc.pid} for {self._name}")
+
+        if block:
+            print("[Main] All bot processes started. MainThread is waiting (Press Ctrl+C to exit).")
+            try:
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                print("\n[Main] Shutdown signal received. Terminating bot processes.")
+                with self._process_lock:
+                    for process in self._spawned_processes:
+                        if process.is_alive():
+                            process.terminate()
+                    for process in self._spawned_processes:
+                        process.join()
+                print("[Main] All processes terminated.")
+        else:
+            return
+    
+    
+    def register_message_receive(
+        self,
+        handler: Callable[[P2ImMessageReceiveV1], None],
+    )-> None:
+        
+        self._event_handler_builder.register_p2_im_message_receive_v1(handler)
     
     
     def parse_message(
