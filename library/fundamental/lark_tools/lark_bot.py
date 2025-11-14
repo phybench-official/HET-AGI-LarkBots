@@ -716,7 +716,6 @@ class LarkBot:
                     print(f"[LarkBot] 警告: 发现图片占位符，但 image_keys 已耗尽")
                     blocks.append(self.build_text_block("[图片加载失败]"))
             elif part == self.divider_placeholder:
-                print("发现分隔线")
                 blocks.append(self.build_divider_block())
             # H1 title
             elif part.startswith(self.begin_of_first_heading):
