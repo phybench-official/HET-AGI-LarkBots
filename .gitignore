@@ -6,5 +6,7 @@ api_keys.json
 lark_api_keys.json
 wolfram_api_keys.json
 
+configs/
+
 test*.py
 document

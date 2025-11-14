@@ -2,11 +2,11 @@ from ...fundamental import *
 
 
 __all__ = [
-    "LarkDocumentTestBot",
+    "PkuPhyFermionBot",
 ]
 
 
-class LarkDocumentTestBot(ParallelThreadLarkBot):
+class PkuPhyFermionBot(ParallelThreadLarkBot):
 
     def __init__(
         self,
@@ -27,11 +27,9 @@ class LarkDocumentTestBot(ParallelThreadLarkBot):
         self._acceptance_cache: OrderedDict[str, bool] = OrderedDict()
         
         self._mention_me_text = f"@{self._name}"
-        
-        lark_document_tester_config = load_from_yaml("configs/lark_document_tester_config.yaml")
-        self._PKU_alumni_association = lark_document_tester_config["PKU_alumni_association"]
-        self._eureka_lab_bot_file_root = lark_document_tester_config["eureka_lab_bot_file_root"]
-        self._uploaded_test_image_key = lark_document_tester_config["uploaded_test_image_key"]
+        self._PKU_alumni_association = "lcnt4qemj6yx"
+        self._eureka_lab_bot_file_root = "AqFDfBPoRlFaREdcWPecbO6SnKe"
+        self._uploaded_test_image_key = "img_v3_02s0_9c0670aa-5608-4bba-9ab0-1c89ab9478fg"
     
     
     def should_process(
@@ -44,15 +42,15 @@ class LarkDocumentTestBot(ParallelThreadLarkBot):
                 if parsed_message["mentioned_me"]:
                     thread_root_id: Optional[str] = parsed_message["thread_root_id"]
                     assert thread_root_id
-                    print(f"[LarkDocumentTestBot] Root message {parsed_message['message_id']} accepted, adding to acceptance cache.")
+                    print(f"[PkuPhyFermionBot] Root message {parsed_message['message_id']} accepted, adding to acceptance cache.")
                     self._acceptance_cache[thread_root_id] = True
                     self._acceptance_cache.move_to_end(thread_root_id)
                     if len(self._acceptance_cache) > self._acceptance_cache_size:
                         evicted_key, _ = self._acceptance_cache.popitem(last=False)
-                        print(f"[LarkDocumentTestBot] Evicted {evicted_key} from acceptance cache.")
+                        print(f"[PkuPhyFermionBot] Evicted {evicted_key} from acceptance cache.")
                     return True
                 else:
-                    print(f"[LarkDocumentTestBot] Dropping root message {parsed_message['message_id']} (not mentioned).")
+                    print(f"[PkuPhyFermionBot] Dropping root message {parsed_message['message_id']} (not mentioned).")
                     return False
             else:
                 return True
@@ -67,7 +65,7 @@ class LarkDocumentTestBot(ParallelThreadLarkBot):
 
         is_accepted: bool = thread_root_id in self._acceptance_cache
         if not is_accepted:
-            print(f"[LarkDocumentTestBot] Thread {thread_root_id} not in acceptance cache. Ignoring.")
+            print(f"[PkuPhyFermionBot] Thread {thread_root_id} not in acceptance cache. Ignoring.")
 
         return {
             "is_accepted": is_accepted,
@@ -149,7 +147,7 @@ class LarkDocumentTestBot(ParallelThreadLarkBot):
                         folder_token = self._eureka_lab_bot_file_root,
                     )
                 except:
-                    print("[LarkDocumentTestBot] 创建文档失败")
+                    print("[PkuPhyFermionBot] 创建文档失败")
                     return context
                 assert document_id is not None
                 document_url = get_lark_document_url(
@@ -191,7 +189,7 @@ class LarkDocumentTestBot(ParallelThreadLarkBot):
                     blocks = blocks,
                 )
             except:
-                print("[LarkDocumentTestBot] 更新文档失败")
+                print("[PkuPhyFermionBot] 更新文档失败")
                 return context
             
             if on_creation:
@@ -213,7 +211,7 @@ class LarkDocumentTestBot(ParallelThreadLarkBot):
         
         except Exception as error:
             print(
-                f"[LarkDocumentTestBot] Error during processing message: {error}\n"
+                f"[PkuPhyFermionBot] Error during processing message: {error}\n"
                 f"{traceback.format_exc()}"
             )
         
