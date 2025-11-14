@@ -3,6 +3,7 @@ from ..externals import *
 from ._lark_sdk import *
 from ..json_tools import *
 from ..backoff_decorators import *
+from ..image_tools import *
 
 
 __all__ = [
@@ -425,7 +426,35 @@ class LarkBot:
         return get_message_resource_result
     
     
-    async def download_message_images(
+    def download_message_images(
+        self,
+        message_id: str,
+        image_keys: List[str],
+    )-> List[bytes]:
+        
+        image_bytes_list: List[bytes] = []
+        if image_keys:
+            task_inputs: List[Tuple[Any, ...]] = [
+                (message_id, image_key, "image") 
+                for image_key in image_keys
+            ]
+            results_dict = run_tasks_concurrently(
+                task = self.get_message_resource,
+                task_indexers = image_keys,
+                task_inputs = task_inputs,
+                show_progress_bar = False,
+            )
+            for image_key in image_keys:
+                result = results_dict[image_key]
+                if not result.success():
+                    raise RuntimeError(
+                        f"下载图片资源 {image_key} 失败: {result.code}, {result.msg}"
+                    )
+                image_bytes_list.append(result.file.read())
+        return image_bytes_list
+    
+    
+    async def download_message_images_async(
         self,
         message_id: str,
         image_keys: List[str],
@@ -453,19 +482,75 @@ class LarkBot:
         return image_bytes_list
     
     
-    def _build_reply_message_request(
+    def _build_create_image_request(
+        self,
+        image_type: str,
+        image: bytes,
+    )-> CreateImageRequest:
+        
+        request_body_builder = CreateImageRequestBody.builder()
+        request_body_builder = request_body_builder.image_type(image_type)
+        request_body_builder = request_body_builder.image(io.BytesIO(image))
+        request_body = request_body_builder.build()
+        request_builder = CreateImageRequest.builder()
+        request_builder = request_builder.request_body(request_body)
+        request = request_builder.build()
+        return request
+    
+    
+    def create_image(
+        self,
+        image_type: str,
+        image: Any,
+    )-> str:
+        
+        image = align_image_to_bytes(image)
+        request = self._build_create_image_request(
+            image_type = image_type,
+            image = image,
+        )
+        assert self._lark_client.im
+        create_image_result = self._lark_client.im.v1.image.create(request)
+        if not create_image_result.success():
+            raise RuntimeError
+        else:
+            assert create_image_result.data
+            assert create_image_result.data.image_key
+            return create_image_result.data.image_key
+        
+        
+    async def create_image_async(
+        self,
+        image_type: str,
+        image: Any,
+    )-> str:
+        
+        image = await align_image_to_bytes_async(image)
+        request = self._build_create_image_request(
+            image_type = image_type,
+            image = image,
+        )
+        assert self._lark_client.im
+        create_image_result = await self._lark_client.im.v1.image.acreate(request)
+        if not create_image_result.success():
+            raise RuntimeError
+        else:
+            assert create_image_result.data
+            assert create_image_result.data.image_key
+            return create_image_result.data.image_key
+    
+    
+    def _check_reply_message_input(
         self,
         response: str,
-        message_id: str,
-        reply_in_thread: bool,
-        image_keys: List[str],
+        images: List[bytes],
         hyperlinks: List[str],
-    )-> ReplyMessageRequest:
+    )-> None:
         
         image_count = response.count(self.image_placeholder)
-        assert image_count == len(image_keys), (
+        assert image_count == len(images), (
             f"图片占位符数量 ({image_count}) "
-            f"与 image_keys 列表长度 ({len(image_keys)}) 不匹配"
+            f"与 images 列表长度 ({len(images)}) 不匹配"
         )
         link_begin_count = response.count(self.begin_of_hyperlink)
         link_end_count = response.count(self.end_of_hyperlink)
@@ -477,7 +562,17 @@ class LarkBot:
             f"超链接标记数量 ({link_begin_count}) "
             f"与 hyperlinks 列表长度 ({len(hyperlinks)}) 不匹配"
         )
-
+    
+    
+    def _build_reply_message_request(
+        self,
+        response: str,
+        message_id: str,
+        reply_in_thread: bool,
+        image_keys: List[str],
+        hyperlinks: List[str],
+    )-> ReplyMessageRequest:
+        
         image_key_iter = iter(image_keys)
         hyperlink_iter = iter(hyperlinks)
         
@@ -544,17 +639,36 @@ class LarkBot:
         response: str,
         message_id: str,
         reply_in_thread: bool = False,
-        image_keys: List[str] = [],
+        images: List[bytes] = [],
         hyperlinks: List[str] = [],
     )-> ReplyMessageResponse:
+        
+        self._check_reply_message_input(
+            response = response,
+            images = images,
+            hyperlinks = hyperlinks,
+        )
+        
+        image_keys = []
+        if images:
+            image_type = "message"
+            create_image_results = run_tasks_concurrently(
+                task = self.create_image,
+                task_indexers = list(range(len(images))),
+                task_inputs = [(image_type, image) for image in images],
+                show_progress_bar = False,
+            )
+            for index in range(len(images)):
+                image_keys.append(create_image_results[index])
         
         request = self._build_reply_message_request(
             response = response, 
             message_id = message_id, 
             reply_in_thread = reply_in_thread, 
-            image_keys = image_keys, 
+            image_keys = image_keys,
             hyperlinks = hyperlinks,
         )
+        
         assert self._lark_client.im
         reply_message_result = self._lark_client.im.v1.message.reply(request)
         return reply_message_result
@@ -565,9 +679,27 @@ class LarkBot:
         response: str,
         message_id: str,
         reply_in_thread: bool = False,
-        image_keys: List[str] = [],
+        images: List[Any] = [],
         hyperlinks: List[str] = [],
     )-> ReplyMessageResponse:
+        
+        self._check_reply_message_input(
+            response = response,
+            images = images,
+            hyperlinks = hyperlinks,
+        )
+        
+        image_keys = []
+        if images:
+            image_type = "message"
+            create_image_results = await run_tasks_concurrently_async(
+                task = self.create_image_async,
+                task_indexers = list(range(len(images))),
+                task_inputs = [(image_type, image) for image in images],
+                show_progress_bar = False,
+            )
+            for index in range(len(images)):
+                image_keys.append(create_image_results[index])
         
         request = self._build_reply_message_request(
             response = response, 
@@ -576,6 +708,7 @@ class LarkBot:
             image_keys = image_keys, 
             hyperlinks = hyperlinks,
         )
+        
         assert self._lark_client.im
         reply_message_result = await self._lark_client.im.v1.message.areply(request)
         return reply_message_result
@@ -699,6 +832,75 @@ class LarkBot:
             raise RuntimeError
     
     
+    # https://open.feishu.cn/document/server-docs/docs/drive-v1/media/introduction
+    def _build_upload_image_for_document_request(
+        self,
+        image: bytes,
+        document_id: str,
+    )-> UploadAllMediaRequest:
+        
+        request_body_builder = UploadAllMediaRequestBody.builder()
+        request_body_builder = request_body_builder.file(io.BytesIO(image))
+        request_body_builder = request_body_builder.file_name(
+            f"{get_time_stamp(show_minute=True, show_second=True)}.png"
+        )
+        request_body_builder = request_body_builder.size(len(image))
+        request_body_builder = request_body_builder.parent_node(document_id) # ？这对吗
+        request_body_builder = request_body_builder.parent_type("docx_image")
+        request_body_builder = request_body_builder.extra(
+            serialize_json({"drive_route_token": document_id})
+        )
+        request_body = request_body_builder.build()
+        
+        request_builder = UploadAllMediaRequest.builder()
+        request_builder = request_builder.request_body(request_body)
+        request = request_builder.build()
+        
+        return request
+    
+    
+    def upload_image_for_document(
+        self,
+        image: Any,
+        document_id: str,
+    )-> str:
+        
+        image = align_image_to_bytes(image)
+        request = self._build_upload_image_for_document_request(
+            image = image,
+            document_id = document_id,
+        )
+        assert self._lark_client.drive
+        create_image_result = self._lark_client.drive.v1.media.upload_all(request)
+        if not create_image_result.success():
+            raise RuntimeError
+        else:
+            assert create_image_result.data
+            assert create_image_result.data.file_token
+            return create_image_result.data.file_token
+    
+       
+    async def upload_image_for_document_async(
+        self,
+        image: Any,
+        document_id: str,
+    )-> str:
+        
+        image = await align_image_to_bytes_async(image)
+        request = self._build_upload_image_for_document_request(
+            image = image,
+            document_id = document_id,
+        )
+        assert self._lark_client.drive
+        create_image_result = await self._lark_client.drive.v1.media.aupload_all(request)
+        if not create_image_result.success():
+            raise RuntimeError
+        else:
+            assert create_image_result.data
+            assert create_image_result.data.file_token
+            return create_image_result.data.file_token
+    
+    
     def build_text_elements(
         self,
         content: str,
@@ -767,7 +969,7 @@ class LarkBot:
     )-> Block:
         
         image = Image.builder().token(image_key).build()
-        block = Block.builder().block_type(self.image_block_type).image(image).build()
+        block = Block.builder().block_type(self.image_block_type).block_id("").image(image).build()
         return block
     
     

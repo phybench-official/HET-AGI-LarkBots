@@ -3,11 +3,13 @@ import os
 import re
 import json
 import time
+import base64
 import logging
 import asyncio
 import aiofiles
 import traceback
 import threading
+import binascii
 import contextlib
 import multiprocessing
 from time import sleep
@@ -32,9 +34,11 @@ __all__ = [
     "time",
     "wraps",
     "sleep",
+    "base64",
     "logging",
     "deepcopy",
     "asyncio",
+    "binascii",
     "aiofiles",
     "traceback",
     "threading",

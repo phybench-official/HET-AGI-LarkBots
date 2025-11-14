@@ -22,6 +22,9 @@ from lark_oapi.api.im.v1 import CreateImageResponse
 from lark_oapi.api.im.v1 import CreateImageRequestBody
 from lark_oapi.api.drive.v1 import DeleteFileRequest
 from lark_oapi.api.drive.v1 import DeleteFileResponse
+from lark_oapi.api.drive.v1 import UploadAllMediaRequest
+from lark_oapi.api.drive.v1 import UploadAllMediaRequestBody
+from lark_oapi.api.drive.v1 import UploadAllMediaResponse
 from lark_oapi.api.docx.v1 import CreateDocumentRequest
 from lark_oapi.api.docx.v1 import CreateDocumentResponse
 from lark_oapi.api.docx.v1 import CreateDocumentRequestBody
@@ -61,6 +64,9 @@ __all__ = [
     "CreateImageRequestBody",
     "DeleteFileRequest",
     "DeleteFileResponse",
+    "UploadAllMediaRequest",
+    "UploadAllMediaRequestBody",
+    "UploadAllMediaResponse",
     "CreateDocumentRequest",
     "CreateDocumentResponse",
     "CreateDocumentRequestBody",

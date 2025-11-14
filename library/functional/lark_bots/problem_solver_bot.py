@@ -89,7 +89,7 @@ class ProblemSolverBot(ParallelThreadLarkBot):
             
             print(f" -> [Worker] 收到任务: {text}，开始处理")
             
-            image_bytes_list = await self.download_message_images(
+            image_bytes_list = await self.download_message_images_async(
                 message_id = message_id,
                 image_keys = image_keys,
             )

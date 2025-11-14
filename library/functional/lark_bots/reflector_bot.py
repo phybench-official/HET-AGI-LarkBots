@@ -43,13 +43,17 @@ class ReflectorBot(LarkBot):
         image_keys: List[str] = parsed_message["image_keys"]
         hyperlinks: List[str] = parsed_message["hyperlinks"]
         
+        image_bytes_list = self.download_message_images(
+            message_id = message_id,
+            image_keys = image_keys,
+        )
         response_text: str = f"Reflecting: {text.replace(self._mention_me_text, '')}"
         
         coro: Coroutine[Any, Any, ReplyMessageResponse] = self.reply_message_async(
             response = response_text,
             message_id = message_id,
             reply_in_thread = False,
-            image_keys = image_keys,
+            images = image_bytes_list,
             hyperlinks = hyperlinks,
         )
         
