@@ -764,7 +764,7 @@ class LarkBot:
         insert_body_builder = insert_body_builder.children(blocks)
         insert_body_builder = insert_body_builder.index(0)
         insert_request_body = insert_body_builder.build()
-
+        
         insert_request_builder = CreateDocumentBlockChildrenRequest.builder()
         insert_request_builder = insert_request_builder.document_id(document_id)
         insert_request_builder = insert_request_builder.block_id(document_root_block_id) 
