@@ -11,15 +11,25 @@ __all__ = [
 
 class ParallelThreadLarkBot(LarkBot):
     
+    _spawned_processes: List[multiprocessing.Process] = []
+    _process_lock: threading.Lock = threading.Lock()
+    
     def __init__(
         self,
         lark_bot_name: str,
-        worker_timeout: float = 600.0,
-        context_cache_size: int = 1024,
-        max_workers: Optional[int] = None,
+        worker_timeout: float,
+        context_cache_size: int,
+        max_workers: Optional[int],
     )-> None:
 
         super().__init__(lark_bot_name)
+        
+        self._init_arguments: Dict[str, Any] = {
+            "lark_bot_name": lark_bot_name,
+            "worker_timeout": worker_timeout,
+            "context_cache_size": context_cache_size,
+            "max_workers": max_workers,
+        }
         
         self._async_loop: Optional[asyncio.AbstractEventLoop] = None
         self._async_thread: Optional[threading.Thread] = None
@@ -37,8 +47,52 @@ class ParallelThreadLarkBot(LarkBot):
         self._max_workers: Optional[int] = max_workers
         
         self._event_handler_builder.register_p2_im_message_receive_v1(
-            self._sync_bridge_callback
+            self._sync_bridge_callback,
         )
+
+
+    @staticmethod
+    def _run_in_process(
+        bot_class: type,
+        init_args: Dict[str, Any],
+    )-> None:
+        """
+        [静态方法] 此方法在独立的子进程中执行。
+        它重新实例化 Bot，并调用其内部启动逻辑。
+        """
+        bot_name = init_args.get("lark_bot_name", "UnknownBot")
+        print(f"[Process-{os.getpid()}] Starting bot: {bot_name}")
+        
+        try:
+            bot_instance = bot_class(**init_args)
+            bot_instance._start_internal_logic()
+        except KeyboardInterrupt:
+            print(f"[Process-{os.getpid()}] Shutdown signal for {bot_name}")
+        except Exception as e:
+            print(f"[Process-{os.getpid()}] Bot {bot_name} crashed: {e}\n{traceback.format_exc()}")
+
+
+    def _start_internal_logic(self)-> None:
+        """
+        [实例方法] 真正的机器人启动逻辑，运行在子进程中。
+        它启动异步循环和阻塞的 Websocket 客户端。
+        """
+        
+        self._async_loop = asyncio.new_event_loop()
+        ready_event = threading.Event()
+        self._async_thread = threading.Thread(
+            target = self._start_async_loop,
+            args = (self._async_loop, ready_event),
+            daemon = True,
+        )
+        print(f"[ParallelThreadLarkBot] Starting synchronous Lark WS client (blocking)...")
+        
+        self._async_thread.start()
+        ready_event.wait()
+        print(f"[ParallelThreadLarkBot] Async worker thread started.")
+        
+        super().start()
+        print(f"[ParallelThreadLarkBot] {self._name} WS client shut down.")
 
     
     def _sync_bridge_callback(
@@ -170,43 +224,49 @@ class ParallelThreadLarkBot(LarkBot):
         self,
         block: bool = False,
     )-> None:
+        """
+        [主进程] 启动 Bot。
         
-        self._async_loop = asyncio.new_event_loop()
-        ready_event = threading.Event()
-    
-        self._async_thread = threading.Thread(
-            target = self._start_async_loop,
-            args = (self._async_loop, ready_event),
+        启动器：此方法现在在子进程中启动 Bot 的实际工作负载，
+        以规避 lark.ws.Client 的全局状态限制。
+        
+        :param block: 
+          - False (默认): 启动子进程并立即返回 (非阻塞)。
+          - True: 启动子进程，然后阻塞主线程以等待 Ctrl+C。
+            收到 Ctrl+C 时，将终止所有已启动的 Bot 进程。
+        """
+        
+        proc = multiprocessing.Process(
+            target = self._run_in_process,
+            args = (
+                self.__class__,
+                self._init_arguments,
+            ),
             daemon = True,
         )
+
+        with self._process_lock:
+            self._spawned_processes.append(proc)
         
-        # 关键修改：不要在这里启动 _async_thread
-        # self._async_thread.start() 
-        # ready_event.wait()
-        
+        proc.start()
+        print(f"[Main] Started process {proc.pid} for {self._name}")
+
         if block:
-            print(f"[ParallelThreadLarkBot] Starting synchronous Lark WS client (blocking)...")
-            
-            # 在 lark.ws.Client 启动并阻塞 *之前* 的瞬间，启动我们的异步循环
-            self._async_thread.start()
-            ready_event.wait()
-            print(f"[ParallelThreadLarkBot] Async worker thread started.")
-            
-            super().start() # 此调用会阻塞
-            print(f"[ParallelThreadLarkBot] {self._name} WS client shut down.")
+            print("[Main] All bot processes started. MainThread is waiting (Press Ctrl+C to exit).")
+            try:
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                print("\n[Main] Shutdown signal received. Terminating bot processes.")
+                with self._process_lock:
+                    for process in self._spawned_processes:
+                        if process.is_alive():
+                            process.terminate()
+                    for process in self._spawned_processes:
+                        process.join()
+                print("[Main] All processes terminated.")
         else:
-            print(f"[ParallelThreadLarkBot] Starting synchronous Lark WS client (non-blocking)...")
-            self._ws_thread = threading.Thread(
-                target = super().start,
-                daemon = True,
-            )
-            
-            # 同时启动 WS 线程和 异步 线程
-            self._async_thread.start()
-            self._ws_thread.start()
-            
-            ready_event.wait() # 等待异步循环就绪
-            print(f"[ParallelThreadLarkBot] {self._name} Async worker and WS client threads started.")
+            return
     
     # ------------------ 业务逻辑钩子 ------------------
     
