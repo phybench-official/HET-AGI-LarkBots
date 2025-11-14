@@ -749,7 +749,7 @@ class LarkBot:
         while True:
             delete_body_builder = BatchDeleteDocumentBlockChildrenRequestBody.builder()
             delete_body_builder = delete_body_builder.start_index(0)
-            delete_body_builder = delete_body_builder.end_index(500)
+            delete_body_builder = delete_body_builder.end_index(1)
             delete_request_body = delete_body_builder.build()
             delete_request_builder = BatchDeleteDocumentBlockChildrenRequest.builder()
             delete_request_builder = delete_request_builder.document_id(document_id)
