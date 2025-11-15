@@ -180,13 +180,14 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             
             blocks = self.build_document_blocks(
                 content = content,
-                # image_keys = [self._uploaded_test_image_key],
             )
-
+            
             try:
                 await self.overwrite_document_async(
                     document_id = document_id,
                     blocks = blocks,
+                    document_id = document_id,
+                    images = image_tools,
                 )
             except:
                 print("[PkuPhyFermionBot] 更新文档失败")
