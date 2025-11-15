@@ -1,0 +1,32 @@
+[project]
+name = "het-agi-larkbots"
+version = "0.1.0"
+description = "An intelligent Lark/Feishu bot framework with AI integration"
+readme = "MCP_EXAMPLE.md"
+requires-python = ">=3.10"
+dependencies = [
+    "aiofiles>=25.1.0",
+    "httpx>=0.28.1",
+    "lark-oapi>=1.0.0",
+    "pywheels>=0.1.0",
+    "requests>=2.31.0",
+    "ruamel.yaml>=0.18.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["library"]
+
+[tool.uv]
+# 配置 PyPI 镜像为北大镜像源（加速下载）
+index-url = "https://mirrors.pku.edu.cn/pypi/web/simple"
+
+[tool.uv.sources]
+# 可选：如果需要从本地路径或 git 仓库安装 pywheels，可以在这里配置
+# 示例：
+# pywheels = { git = "https://github.com/your-org/pywheels.git" }
+# pywheels = { path = "../pywheels", editable = true }
+
