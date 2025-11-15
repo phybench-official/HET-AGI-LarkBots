@@ -27,18 +27,22 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         self._acceptance_cache: OrderedDict[str, bool] = OrderedDict()
         
         self._mention_me_text = f"@{self._name}"
-        self._PKU_alumni_association = "lcnt4qemj6yx"
-        self._eureka_lab_bot_file_root = "AqFDfBPoRlFaREdcWPecbO6SnKe"
-        self._uploaded_test_image_key = "img_v3_02s0_9c0670aa-5608-4bba-9ab0-1c89ab9478fg"
-    
+        
+        pku_phy_fermion_config = load_from_yaml(f"configs{seperator}pku_phy_fermion_config.yaml")
+        self._PKU_alumni_association = pku_phy_fermion_config["PKU_alumni_association"]
+        self._eureka_lab_bot_file_root = pku_phy_fermion_config["eureka_lab_bot_file_root"]
+
     
     def should_process(
         self,
         parsed_message: Dict[str, Any],
     )-> bool:
         
+        # 群聊消息
         if parsed_message["chat_type"] == "group":
+            # 是顶层消息
             if parsed_message["is_thread_root"]:
+                # @了机器人，需要处理
                 if parsed_message["mentioned_me"]:
                     thread_root_id: Optional[str] = parsed_message["thread_root_id"]
                     assert thread_root_id
@@ -49,11 +53,14 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
                         evicted_key, _ = self._acceptance_cache.popitem(last=False)
                         print(f"[PkuPhyFermionBot] Evicted {evicted_key} from acceptance cache.")
                     return True
+                # 没有@机器人，直接忽略
                 else:
                     print(f"[PkuPhyFermionBot] Dropping root message {parsed_message['message_id']} (not mentioned).")
                     return False
+            # 是话题内消息，不知道对应的顶层消息怎样，需要处理
             else:
                 return True
+        # 私聊消息，返回教程
         else:
             return True
     
@@ -72,6 +79,17 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             "document_id": None,
             "document_title": None,
             "document_url": None,
+            "stage": "obtaining_problem",
+            "problem": {
+                "text": None,
+                "images": [],
+            },
+            "answer": None,
+            "owner": None,
+            "AI_solution": None,
+            "extra_info": {
+                "AI_solution_correctness": None,
+            }
         }
 
     
@@ -80,141 +98,78 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         parsed_message: Dict[str, Any],
         context: Dict[str, Any],
     )-> Dict[str, Any]:
+
+        message_id: str = parsed_message["message_id"]
+        chat_type: str = parsed_message["chat_type"]
+        is_thread_root: bool = parsed_message["is_thread_root"]
+        text: str = parsed_message["text"]
+        mentioned_me: bool = parsed_message["mentioned_me"]
+        sender: Optional[str] = parsed_message["sender"]
         
-        try:
-            
-            message_id: str = parsed_message["message_id"]
-            chat_type: str = parsed_message["chat_type"]
-            is_thread_root: bool = parsed_message["is_thread_root"]
-            text: str = parsed_message["text"]
-            mentioned_me: bool = parsed_message["mentioned_me"]
-            
-            if chat_type == "group":
-                if not is_thread_root and not context["is_accepted"]:
+        # 群聊消息
+        if chat_type == "group":
+            # 是顶层消息
+            if is_thread_root:
+                # 进入业务逻辑
+                if context["is_accepted"]:
+                    assert context["owner"] is None
+                    context["owner"] = sender
+                    pass
+                # 应该到不了这里
+                else:
+                    raise RuntimeError
+            # 是话题内消息
+            else:
+                # 顶层消息@了，鉴权后进入业务逻辑
+                if context["is_accepted"]:
+                    if sender == context["owner"]:
+                        pass
+                    else:
+                        if mentioned_me:
+                            await self.reply_message_async(
+                                response = "请在群聊中@我以发起我和您的专属话题~",
+                                message_id = message_id,
+                            )
+                            return context
+                        else:
+                            return context
+                # 顶层消息没有@，不进入业务逻辑
+                # 如果这一条消息@了，提示要在顶层消息中@
+                else:
                     if mentioned_me:
                         await self.reply_message_async(
-                            response = "请在群聊中@我~",
+                            response = "请在群聊中@我以发起我和您的专属话题~",
                             message_id = message_id,
                         )
                     return context
-            else:
-                await self.reply_message_async(
-                    response = "请在群聊中与我对话~您可以拉一个我与您的小群",
-                    message_id = message_id,
-                )
-                return context
-            
-            print(f" -> [Worker] 收到任务: {text}，开始处理")
-            
-            if text == "删除此文档":
-                if context["document_id"] is not None:
-                    try:
-                        await self.delete_file_async(
-                            file_token = context["document_id"],
-                        )
-                    except:
-                        await self.reply_message_async(
-                            response = "文档删除失败...",
-                            message_id = message_id,
-                            reply_in_thread = True,
-                        )
-                        return context
-                    await self.reply_message_async(
-                        response = "文档已删除~",
-                        message_id = message_id,
-                        reply_in_thread = True,
-                    )
-                    context["document_id"] = None
-                    return context
-                else:
-                    await self.reply_message_async(
-                        response = "当前话题下暂无文档，请先创建文档~",
-                        message_id = message_id,
-                        reply_in_thread = True,
-                    )
-                    return context
-            
-            text = text.replace(self.begin_of_hyperlink, "")
-            text = text.replace(self.end_of_hyperlink, "")
-            
-            document_id: Optional[str] = context["document_id"]
-            if document_id is None:
-                on_creation = True
-                document_title = f"测试文档-{get_time_stamp(show_minute=True, show_second=True)}"
-                try:
-                    document_id = await self.create_document_async(
-                        title = document_title,
-                        folder_token = self._eureka_lab_bot_file_root,
-                    )
-                except:
-                    print("[PkuPhyFermionBot] 创建文档失败")
-                    return context
-                assert document_id is not None
-                document_url = get_lark_document_url(
-                    tenant = self._PKU_alumni_association,
-                    document_id = document_id,
-                )
-                context["document_id"] = document_id
-                context["document_title"] = document_title
-                context["document_url"] = document_url
-            else:
-                on_creation = False
-                document_title = context["document_title"]
-                document_url = context["document_url"]
-                assert document_title is not None
-                assert document_url is not None
-
-            text = text.replace(self._mention_me_text, "")
-            content = ""
-            content += f"{self.begin_of_third_heading}你刚刚新发的内容{self.end_of_third_heading}"
-            content += text
-            content += self.divider_placeholder
-            content += f"{self.begin_of_third_heading}云文档图片上传展示{self.end_of_third_heading}"
-            # content += self.image_placeholder
-            content += "WIP."
-            content += self.divider_placeholder
-            content += f"{self.begin_of_third_heading}云文档公式渲染展示{self.end_of_third_heading}"
-            content += f"""这是一个行内公式：{self.begin_of_equation}\\sqrt{{2}}\\ne\\frac{{p}}{{q}}{self.end_of_equation}，它在行内
-{self.begin_of_equation}\\boxed{{2^x+1=3^y, x, y \\in \\mathbb{{N}}^* \\Rightarrow (x,y)=(1,1) \\text{{ or }} (x,y)=(3,2)}}{self.end_of_equation}
-{self.begin_of_equation}(M^{{-1}})^\\dagger = \\left[ \\exp\\left(\\frac{{i}}{{2}} \\omega_{{\\mu\\nu}} \\sigma^{{\\mu\\nu}}\\right) \\right]^\\dagger = \\exp\\left( -\\frac{{i}}{{2}} \\omega_{{\\mu\\nu}} (\\sigma^{{\\mu\\nu}})^\\dagger \\right){self.end_of_equation}"""           
-            
-            blocks = self.build_document_blocks(
-                content = content,
+        # 私聊消息，返回教程
+        else:
+            await self.reply_message_async(
+                response = "请在群聊中@我以发起我和您的专属话题~您可以拉一个我和您的小群，正在向您发送教程中...",
+                message_id = message_id,
             )
-            
-            try:
-                await self.overwrite_document_async(
-                    document_id = document_id,
-                    blocks = blocks,
-                    document_id = document_id,
-                    images = image_tools,
-                )
-            except:
-                print("[PkuPhyFermionBot] 更新文档失败")
-                return context
-            
-            if on_creation:
-                await self.reply_message_async(
-                    response = f"已创建文档 {self.begin_of_hyperlink}{document_title}{self.end_of_hyperlink}",
-                    message_id = message_id,
-                    reply_in_thread = True,
-                    hyperlinks = [document_url],
-                )
-            else:
-                await self.reply_message_async(
-                    response = f"文档 {self.begin_of_hyperlink}{document_title}{self.end_of_hyperlink} 已更新~",
-                    message_id = message_id,
-                    reply_in_thread = True,
-                    hyperlinks = [document_url],
-                )
-            
+            await self.reply_message_async(
+                response = self.image_placeholder * 5,
+                message_id = message_id,
+                images = [
+                    f"pictures{seperator}PKU_PHY_fermion{seperator}create_group_instructions{seperator}{no}.png"
+                    for no in range(1, 6)
+                ],
+            )
+            await self.reply_message_async(
+                response = "相关教程已发送，请您查阅！",
+                message_id = message_id,
+            )
             return context
         
-        except Exception as error:
-            print(
-                f"[PkuPhyFermionBot] Error during processing message: {error}\n"
-                f"{traceback.format_exc()}"
-            )
+        print(f" -> [Worker] 收到任务: {text}，开始处理")
+        
+        # TODO: 业务逻辑
+        await self.reply_message_async(
+            response = "命令很简单 不要吃大份",
+            message_id = message_id,
+            reply_in_thread = True,
+        )
         
         return context
     

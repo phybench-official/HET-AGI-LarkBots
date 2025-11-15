@@ -237,6 +237,12 @@ class LarkBot:
             return {"success": False, "error": f"收到非字符串 chat_type: {chat_type}"}
         if not isinstance(message_content, str):
             return {"success": False, "error": f"收到非字符串 message_content: {message_content}"}
+        try:
+            assert message.event.sender
+            assert message.event.sender.sender_id
+            sender = message.event.sender.sender_id.open_id
+        except:
+            sender = None
         
         if chat_type == "group":
             if message.event.message.root_id:
@@ -284,6 +290,7 @@ class LarkBot:
                 "thread_root_id": thread_root_id,
                 "is_thread_root": is_thread_root,
                 "chat_type": chat_type,
+                "sender": sender,
                 "text": text,
                 "image_keys": [],
                 "hyperlinks": [],
@@ -325,6 +332,7 @@ class LarkBot:
                 "thread_root_id": thread_root_id,
                 "is_thread_root": is_thread_root,
                 "chat_type": chat_type,
+                "sender": sender,
                 "text": text,
                 "image_keys": image_keys,
                 "hyperlinks": hyperlinks,
@@ -342,6 +350,7 @@ class LarkBot:
                 "thread_root_id": thread_root_id,
                 "is_thread_root": is_thread_root,
                 "chat_type": chat_type,
+                "sender": sender,
                 "text": "",
                 "image_keys": [image_key],
                 "hyperlinks": [],
@@ -360,6 +369,7 @@ class LarkBot:
                 "thread_root_id": thread_root_id,
                 "is_thread_root": is_thread_root,
                 "chat_type": chat_type,
+                "sender": sender,
                 "text": "",
                 "image_keys": [],
                 "hyperlinks": [],

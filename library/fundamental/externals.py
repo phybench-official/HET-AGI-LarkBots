@@ -16,6 +16,7 @@ from time import sleep
 from copy import deepcopy
 from functools import wraps
 from random import normalvariate
+from os.path import sep as seperator
 from ruamel.yaml import YAML as ruamel_yaml
 from concurrent.futures import ThreadPoolExecutor
 from collections import OrderedDict
@@ -42,6 +43,7 @@ __all__ = [
     "aiofiles",
     "traceback",
     "threading",
+    "seperator",
     "multiprocessing",
     "get_time_stamp",
     "get_answer",
