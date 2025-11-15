@@ -164,12 +164,49 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         
         print(f" -> [Worker] 收到任务: {text}，开始处理")
         
-        # TODO: 业务逻辑
-        await self.reply_message_async(
-            response = "命令很简单 不要吃大份",
-            message_id = message_id,
-            reply_in_thread = True,
-        )
+        stage = context["stage"]
+        if stage == "obtaining_problem":
+            return await self._obtain_problem(
+                parsed_message = parsed_message,
+                context = context,
+            )
+        elif stage == "solving_problem":
+            return await self._obtain_problem(
+                parsed_message = parsed_message,
+                context = context,
+            )
+        elif stage == "archiving_problem":
+            return await self._archive_problem(
+                parsed_message = parsed_message,
+                context = context,
+            )
+        else:
+            raise RuntimeError
+    
+    
+    async def _obtain_problem(
+        self,
+        parsed_message: Dict[str, Any],
+        context: Dict[str, Any],
+    )-> Dict[str, Any]:
         
-        return context
+        return {}
+    
+    
+    async def _solve_problem(
+        self,
+        parsed_message: Dict[str, Any],
+        context: Dict[str, Any],
+    )-> Dict[str, Any]:
+        
+        return {}
+    
+    
+    async def _archive_problem(
+        self,
+        parsed_message: Dict[str, Any],
+        context: Dict[str, Any],
+    )-> Dict[str, Any]:
+        
+        return {}
     
