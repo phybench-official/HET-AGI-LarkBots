@@ -1028,75 +1028,56 @@ class LarkBot:
             return create_image_result.data.file_token
     
     
-    async def _upload_and_update_image_block_async(
-        self,
-        document_id: str,
-        block_id: str,
-        image_bytes: bytes,
-    )-> None:
-
-        image_token: str = await self.upload_image_for_document_async(
-            image = image_bytes,
-            document_id = document_id,
-            block_id = block_id,
-        )
-        
-        request_builder = ReplaceImageRequest.builder()
-        request_builder = request_builder.token(image_token)
-        request = request_builder.build()
-        
-        request_builder = UpdateBlockRequest.builder()
-        request_builder = request_builder.block_id(block_id)
-        request_builder = request_builder.replace_image(request)
-        request = request_builder.build()
-        
-        request_body_builder = BatchUpdateDocumentBlockRequestBody.builder()
-        request_body_builder = request_body_builder.requests([request])
-        request_body = request_body_builder.build()
-        
-        request_builder = BatchUpdateDocumentBlockRequest.builder()
-        request_builder = request_builder.document_id(document_id)
-        request_builder = request_builder.request_body(request_body)
-        request = request_builder.build()
-        
-        assert self._lark_client.docx
-        update_response = await self._lark_client.docx.v1.document_block.abatch_update(request)
-        
-        if not update_response.success(): 
-            print(f"[LarkBot] Failed to update image block {block_id} "
-                  f"with token {image_token}: {update_response.code} {update_response.msg}")
-            raise RuntimeError
-    
-    
     @backoff_async(overwrite_document_backoff_seconds)
     async def overwrite_document_async(
         self,
         document_id: str,
         blocks: List[Block],
         images: List[bytes],
+        existing_block_num: Optional[int] = None,
     )-> None:
         
-        document_root_block_id = document_id
+        document_root_block_id: str = document_id
         assert self._lark_client.docx
-
-        while True:
+        
+        first_deletion_attempt = False
+        if existing_block_num is not None:
             delete_body_builder = BatchDeleteDocumentBlockChildrenRequestBody.builder()
             delete_body_builder = delete_body_builder.start_index(0)
-            delete_body_builder = delete_body_builder.end_index(1)
+            delete_body_builder = delete_body_builder.end_index(existing_block_num)
             delete_request_body = delete_body_builder.build()
+            
             delete_request_builder = BatchDeleteDocumentBlockChildrenRequest.builder()
             delete_request_builder = delete_request_builder.document_id(document_id)
             delete_request_builder = delete_request_builder.block_id(document_root_block_id)
             delete_request_builder = delete_request_builder.request_body(delete_request_body)
             delete_request = delete_request_builder.build()
+            
             delete_response = await self._lark_client.docx.v1.document_block_children.abatch_delete(delete_request)
-            if not delete_response.success(): break
+            if delete_response.success(): first_deletion_attempt = True
         
+        if first_deletion_attempt != True:
+            while True:
+                delete_body_builder = BatchDeleteDocumentBlockChildrenRequestBody.builder()
+                delete_body_builder = delete_body_builder.start_index(0)
+                delete_body_builder = delete_body_builder.end_index(1)
+                delete_request_body = delete_body_builder.build()
+                
+                delete_request_builder = BatchDeleteDocumentBlockChildrenRequest.builder()
+                delete_request_builder = delete_request_builder.document_id(document_id)
+                delete_request_builder = delete_request_builder.block_id(document_root_block_id)
+                delete_request_builder = delete_request_builder.request_body(delete_request_body)
+                delete_request = delete_request_builder.build()
+                
+                delete_response = await self._lark_client.docx.v1.document_block_children.abatch_delete(delete_request)
+                if not delete_response.success(): break
+
         if not blocks: return None
+
         insert_body_builder = CreateDocumentBlockChildrenRequestBody.builder()
         insert_body_builder = insert_body_builder.children(blocks)
         insert_body_builder = insert_body_builder.index(0)
-        insert_request_body = insert_body_builder.build()
+        insert_request_body: CreateDocumentBlockChildrenRequestBody = insert_body_builder.build()
         
         insert_request_builder = CreateDocumentBlockChildrenRequest.builder()
         insert_request_builder = insert_request_builder.document_id(document_id)
@@ -1118,22 +1099,55 @@ class LarkBot:
             if block.block_type == self.image_block_type:
                 assert block.block_id is not None
                 image_block_ids.append(block.block_id)
+        if not images and not image_block_ids: return None
 
         if len(image_block_ids) != len(images):
             print(
                 f"[LarkBot] 警告: 文档中创建了 {len(image_block_ids)} 个图片块, "
                 f"但只提供了 {len(images)} 张图片。将只填充前面的图片。"
             )
-        
-        upload_tasks: List[Coroutine[Any, Any, None]] = []
-        for block_id, image_bytes in zip(image_block_ids, images):
-            task = self._upload_and_update_image_block_async(
+
+        upload_tasks: List[Coroutine[Any, Any, str]] = []
+        paired_uploads = zip(image_block_ids, images)
+        for block_id, image_bytes in paired_uploads:
+            task = self.upload_image_for_document_async(
+                image = image_bytes,
                 document_id = document_id,
                 block_id = block_id,
-                image_bytes = image_bytes
             )
             upload_tasks.append(task)
-        if upload_tasks: await asyncio.gather(*upload_tasks)
+        
+        if not upload_tasks: return None
+
+        image_tokens: List[str] = await asyncio.gather(*upload_tasks)
+        update_requests: List[UpdateBlockRequest] = []
+        valid_block_ids_to_update = image_block_ids[:len(image_tokens)]
+        for block_id, image_token in zip(valid_block_ids_to_update, image_tokens):
+            replace_image_req_builder = ReplaceImageRequest.builder()
+            replace_image_req_builder = replace_image_req_builder.token(image_token)
+            replace_image_req = replace_image_req_builder.build()
+            update_req_builder = UpdateBlockRequest.builder()
+            update_req_builder = update_req_builder.block_id(block_id)
+            update_req_builder = update_req_builder.replace_image(replace_image_req)
+            update_req = update_req_builder.build()
+            update_requests.append(update_req)
+
+        request_body_builder = BatchUpdateDocumentBlockRequestBody.builder()
+        request_body_builder = request_body_builder.requests(update_requests)
+        request_body = request_body_builder.build()
+        
+        batch_update_request_builder = BatchUpdateDocumentBlockRequest.builder()
+        batch_update_request_builder = batch_update_request_builder.document_id(document_id)
+        batch_update_request_builder = batch_update_request_builder.request_body(request_body)
+        batch_update_request = batch_update_request_builder.build()
+        
+        assert self._lark_client.docx
+        update_response = await self._lark_client.docx.v1.document_block.abatch_update(batch_update_request)
+        
+        if not update_response.success(): 
+            print(f"[LarkBot] Failed to batch update image blocks: "
+                f"{update_response.code} {update_response.msg}")
+            raise RuntimeError
 
         return None
     

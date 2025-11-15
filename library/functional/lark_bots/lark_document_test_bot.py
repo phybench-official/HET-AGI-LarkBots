@@ -193,6 +193,7 @@ class LarkDocumentTestBot(ParallelThreadLarkBot):
                     document_id = document_id,
                     blocks = blocks,
                     images = [image],
+                    existing_block_num = 0 if on_creation else 10,
                 )
             except:
                 print("[LarkDocumentTestBot] 更新文档失败")
