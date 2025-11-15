@@ -2,7 +2,7 @@
 name = "het-agi-larkbots"
 version = "0.1.0"
 description = "An intelligent Lark/Feishu bot framework with AI integration"
-readme = "MCP_EXAMPLE.md"
+readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "aiofiles>=25.1.0",

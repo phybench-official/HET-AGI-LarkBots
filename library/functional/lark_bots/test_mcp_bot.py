@@ -82,15 +82,29 @@ class TestMCPBot(ParallelThreadLarkBot):
         1. 用户@了机器人
         2. 消息包含特定关键词
         """
-        text: str = parsed_message.get("text", "")
-        mentioned_me: bool = parsed_message.get("mentioned_me", False)
+        try:
+            text: str = parsed_message.get("text", "")
+            mentioned_me: bool = parsed_message.get("mentioned_me", False)
 
-        keywords = ["【测试】", "【数学】", "mathematica", "Mathematica", "MCP", "mcp"]
-        if mentioned_me or any(keyword in text for keyword in keywords):
-            print(f" -> [TestMCPBot Filter] 消息命中，转交给 Worker")
-            return True
+            # 调试日志
+            print(f" -> [TestMCPBot Filter] 收到消息")
+            print(f"    文本: {text}")
+            print(f"    提及我: {mentioned_me}")
 
-        return False
+            keywords = ["【测试】", "【数学】", "mathematica", "Mathematica", "MCP", "mcp"]
+
+            if mentioned_me or any(keyword in text for keyword in keywords):
+                print(f" -> [TestMCPBot Filter] 消息命中，转交给 Worker")
+                return True
+
+            print(f" -> [TestMCPBot Filter] 消息不匹配，忽略")
+            return False
+
+        except Exception as e:
+            print(f" -> [TestMCPBot Filter] should_process 异常: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
 
 
     async def get_initial_context(
