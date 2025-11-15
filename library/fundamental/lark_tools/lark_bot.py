@@ -264,13 +264,13 @@ class LarkBot:
             mention_list = message.event.message.mentions
             assert mention_list
         except:
-            mention_list = [] 
+            mention_list = []
         mentioned_me = any(
             mention.id.open_id == self._open_id
             for mention in mention_list
             if mention.id is not None
         )
-
+        
         message_content_dict_keys = set(key for key in message_content_dict)
         if message_content_dict_keys == set(["text"]):
             text = message_content_dict["text"]
