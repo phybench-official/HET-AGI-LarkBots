@@ -1,4 +1,5 @@
 from typing import Dict, Any, List, Optional
+from collections import OrderedDict
 import traceback
 
 from ...fundamental.lark_tools import ParallelThreadLarkBot
@@ -22,8 +23,6 @@ test_mcp_prompt_template = """
 
 **Mathematica 工具**（用于数学计算，功能强大）:
 - evaluate_mathematica: 执行 Mathematica 代码，适合符号计算、方程求解、微积分、高能物理计算、矩阵运算等
-- evaluate_batch: 批量执行多个 Mathematica 表达式，适合多步骤计算
-- get_package_info: 查询 Mathematica 包（如 FeynCalc）的信息和用法
 
 # 工作流程
 1. **理解用户意图**: 判断用户是想聊天还是需要数学计算
@@ -66,12 +65,17 @@ class TestMCPBot(ParallelThreadLarkBot):
 
     使用 pywheels get_answer_async + mathematica_tool 进行 MCP 工具调用。
     不再需要 MCPOpenAISession 包装器，直接使用 mathematica_tool。
+
+    群聊规则：
+    - 只有在话题顶层消息 @ 机器人时才会开始处理该话题
+    - 话题内的后续消息会自动处理（无需再次 @）
+    - 未被接受的话题中 @ 机器人会提示用户在顶层消息 @ 机器人
     """
 
     def __init__(
         self,
         lark_bot_name: str,
-        model_name: str = "Deepseek-V3",
+        model_name: str = "GPT-5",
         mcp_server_name: str = "mathematica",
         mcp_config_path: str = "mcp_servers_config.json",
         api_keys_path: str = "api_keys.json",
@@ -96,6 +100,10 @@ class TestMCPBot(ParallelThreadLarkBot):
         # 标记 API keys 是否已加载
         self._api_keys_loaded = False
 
+        # 接受的话题缓存（用于群聊 @ 逻辑）
+        self._acceptance_cache_size: int = context_cache_size
+        self._acceptance_cache: OrderedDict[str, bool] = OrderedDict()
+
 
     def should_process(
         self,
@@ -104,26 +112,51 @@ class TestMCPBot(ParallelThreadLarkBot):
         """
         判断是否应该处理此消息
 
-        处理策略：处理所有消息，让 AI 自己决定是否调用工具
+        群聊处理策略：
+        1. 如果是顶层消息（is_thread_root=True）：
+           - 必须 @ 机器人才会处理并加入接受缓存
+           - 未 @ 的顶层消息会被忽略
+        2. 如果是话题内消息（is_thread_root=False）：
+           - 总是返回 True，交给 process_message_in_context 判断
+
+        私聊处理策略：
+        - 总是返回 True
         """
-        try:
-            text: str = parsed_message.get("text", "")
-            chat_type: str = parsed_message.get("chat_type", "")
+        chat_type: str = parsed_message.get("chat_type", "")
+        is_thread_root: bool = parsed_message.get("is_thread_root", False)
+        mentioned_me: bool = parsed_message.get("mentioned_me", False)
+        message_id: str = parsed_message.get("message_id", "")
 
-            # 调试日志
-            print(f" -> [TestMCPBot Filter] 收到消息")
-            print(f"    聊天类型: {chat_type}")
-            print(f"    文本: {text[:50]}..." if len(text) > 50 else f"    文本: {text}")
+        # 群聊消息
+        if chat_type == "group":
+            # 顶层消息（话题根消息）
+            if is_thread_root:
+                # @了机器人，加入接受缓存并处理
+                if mentioned_me:
+                    thread_root_id: Optional[str] = parsed_message.get("thread_root_id")
+                    assert thread_root_id is not None
 
-            # 处理所有消息，让 AI 决定如何响应
-            print(f" -> [TestMCPBot Filter] 消息已接受，转交给 Worker")
+                    print(f" -> [TestMCPBot Filter] 顶层消息 {message_id} 已接受（已 @），加入接受缓存")
+
+                    self._acceptance_cache[thread_root_id] = True
+                    self._acceptance_cache.move_to_end(thread_root_id)
+
+                    # 缓存溢出时移除最旧的条目
+                    if len(self._acceptance_cache) > self._acceptance_cache_size:
+                        evicted_key, _ = self._acceptance_cache.popitem(last=False)
+                        print(f" -> [TestMCPBot Filter] 接受缓存已满，移除 {evicted_key}")
+
+                    return True
+                # 没有@机器人，忽略
+                else:
+                    print(f" -> [TestMCPBot Filter] 顶层消息 {message_id} 已忽略（未 @）")
+                    return False
+            # 话题内消息，总是返回 True（在 process_message_in_context 中判断是否处理）
+            else:
+                return True
+        # 私聊消息，总是处理
+        else:
             return True
-
-        except Exception as e:
-            print(f" -> [TestMCPBot Filter] should_process 异常: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
 
 
     async def get_initial_context(
@@ -133,9 +166,16 @@ class TestMCPBot(ParallelThreadLarkBot):
         """
         初始化会话上下文
 
-        对于测试机器人，我们不需要保存复杂的历史记录
+        检查该话题是否在接受缓存中（即是否通过顶层 @ 启动）
         """
-        return {}
+        is_accepted: bool = thread_root_id in self._acceptance_cache
+
+        if not is_accepted:
+            print(f" -> [TestMCPBot Context] 话题 {thread_root_id} 不在接受缓存中")
+
+        return {
+            "is_accepted": is_accepted,
+        }
 
 
     async def process_message_in_context(
@@ -146,17 +186,51 @@ class TestMCPBot(ParallelThreadLarkBot):
         """
         处理消息的核心逻辑
 
-        1. 提取消息内容（文本和图片）
-        2. 使用 get_answer_async + mathematica_tool 调用 MCP 工具
-        3. 返回计算结果
+        群聊逻辑对齐 pku_phy_fermion_bot：
+        1. 群聊顶层消息：如果被接受则进入业务逻辑，否则抛出异常
+        2. 群聊话题内消息：如果话题被接受则进入业务逻辑，否则提示用户
+        3. 私聊消息：正常处理，不强制要求用户去群聊
         """
         message_id: str = parsed_message["message_id"]
+        chat_type: str = parsed_message["chat_type"]
+        is_thread_root: bool = parsed_message["is_thread_root"]
+        mentioned_me: bool = parsed_message["mentioned_me"]
+        text: str = parsed_message["text"]
+        image_keys: List[str] = parsed_message["image_keys"]
+
+        # 群聊消息
+        if chat_type == "group":
+            # 是顶层消息
+            if is_thread_root:
+                # 进入业务逻辑
+                if context["is_accepted"]:
+                    pass  # 继续执行业务逻辑
+                # 应该到不了这里（should_process 已经过滤了未 @ 的顶层消息）
+                else:
+                    raise RuntimeError(
+                        f"[TestMCPBot] 顶层消息 {message_id} 未被接受，但进入了 process_message_in_context"
+                    )
+            # 是话题内消息
+            else:
+                # 顶层消息 @了，进入业务逻辑
+                if context["is_accepted"]:
+                    pass  # 继续执行业务逻辑
+                # 顶层消息没有 @，但这条消息 @ 了机器人
+                # 也应该正常处理并进入业务逻辑
+                elif mentioned_me:
+                    pass  # 继续执行业务逻辑
+                # 顶层消息没有 @，这条消息也没有 @
+                # 不进入业务逻辑
+                else:
+                    return context
+        # 私聊消息，正常处理（不强制要求用户去群聊）
+        else:
+            pass  # 继续执行业务逻辑
+
+        # 业务逻辑：处理消息并调用 MCP 工具
         response: str = ""
 
         try:
-            text: str = parsed_message["text"]
-            image_keys: List[str] = parsed_message["image_keys"]
-
             print(f" -> [TestMCPBot Worker] 收到任务: {text[:100]}...")
 
             # 确保 API keys 已加载

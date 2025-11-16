@@ -10,8 +10,8 @@ def main():
     # PKU_PHY_fermion.start(block=True)
 
     # 使用新的 TestMCPBot 来测试 Mathematica MCP 集成
-    # test_mcp = TestMCPBot("测码者")
-    # test_mcp.start(block=True)
+    test_mcp = TestMCPBot("测码者")
+    test_mcp.start(block=True)
 
     print("[Main] MainThread exiting.")
 
