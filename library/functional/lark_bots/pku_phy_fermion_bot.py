@@ -53,6 +53,12 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         self._confirm_problem_timeout = pku_phy_fermion_config["problem_confirming"]["timeout"]
         self._confirm_problem_trial_num = pku_phy_fermion_config["problem_confirming"]["trial_num"]
         self._confirm_problem_trial_interval = pku_phy_fermion_config["problem_confirming"]["trial_interval"]
+        self._solve_problem_model = pku_phy_fermion_config["problem_solving"]["model"]
+        self._solve_problem_temperature = pku_phy_fermion_config["problem_solving"]["temperature"]
+        self._solve_problem_timeout = pku_phy_fermion_config["problem_solving"]["timeout"]
+        self._solve_problem_trial_num = pku_phy_fermion_config["problem_solving"]["trial_num"]
+        self._solve_problem_trial_interval = pku_phy_fermion_config["problem_solving"]["trial_interval"]
+        self._solve_problem_tool_use_trial_num = pku_phy_fermion_config["problem_solving"]["tool_use_trial_num"]
         self._archive_problem_model = pku_phy_fermion_config["problem_archiving"]["model"]
         self._archive_problem_temperature = pku_phy_fermion_config["problem_archiving"]["temperature"]
         self._archive_problem_timeout = pku_phy_fermion_config["problem_archiving"]["timeout"]
@@ -116,6 +122,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             "history": {
                 "prompt": [],
                 "images": [],
+                "roles": [],
             },
             "document_created": False,
             "document_id": None,
@@ -156,6 +163,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         
         context["history"]["prompt"].append(text)
         context["history"]["images"].extend(images)
+        context["history"]["roles"].append("user")
         
         return None
 
@@ -273,32 +281,24 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             await self._sync_document_content_with_context(
                 context = context,
             )
-            
-            await self.reply_message_async(
+
+            await self._reply_message_in_context(
+                context = context,
                 response = f"您的题目已整理进文档{self.begin_of_hyperlink}{document_title}{self.end_of_hyperlink}，正在进一步处理中，请稍等...",
                 message_id = message_id,
-                reply_in_thread = True,
-                hyperlinks = [document_url]
+                hyperlinks = [document_url],
             )
 
             return await self._try_to_confirm_problem(
                 context = context,
-                prompt = context["history"]["prompt"],
-                images = context["history"]["images"],
-                problem_text = problem_text,
-                problem_images = problem_images,
-                answer = answer,
+                message_id = message_id,
             )
-
+        
         elif not context["problem_confirmed"]:
-                    
+            
             return await self._try_to_confirm_problem(
                 context = context,
-                prompt = context["history"]["prompt"],
-                images = context["history"]["images"],
-                problem_text = context["problem_text"],
-                problem_images = context["problem_images"],
-                answer = context["answer"],
+                message_id = message_id,
             )
         
         elif not context["AI_solver_finished"]:
@@ -398,7 +398,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             response: str,
         )-> bool:
             nonlocal result
-            print(f"这一次的 response 是：\n{response}")
+            print(f"Understand Problem: checking the following response now\n{response}")
             try:
                 halfway_result = {}
                 json_pattern = r'```json\s*(.*?)\s*```'
@@ -487,241 +487,227 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         self,
         context: Dict[str, Any],
         message_id: str,
-        all_prompts: List[str],
-        all_images: List[bytes],
-        problem_text: str,
-        problem_images: List[bytes],
-        answer: str,
     )-> Dict[str, Any]:
         
-        # 1. 准备 Prompt 输入
+        document_id = context["document_id"]
+        document_url = context["document_url"]
+        problem_text = context["problem_text"]
+        problem_images = context["problem_images"]
+        answer = context["answer"]
+        history_prompts = context["history"]["prompt"]
+        history_images = context["history"]["images"]
+        history_roles = context["history"]["roles"]
         
-        # 格式化当前的题目图片
-        formatted_problem_images = ""
-        if not problem_images:
-            formatted_problem_images = "无"
-        else:
-            # 注意：这里的索引是相对于 'problem_images' 列表的，
-            # 而 'all_images' 包含了更多图片。LLM 只能看到 'all_images'。
-            # 这是一个有风险的设计，但我们暂时只能如此。
-            # 我们假设 LLM 足够聪明，能区分。
-            formatted_problem_images = f"（包含 {len(problem_images)} 张图片）"
+        problem_image_num = len(problem_images)
+        former_multi_round_conversations = ""
+        for prompt, role in zip(history_prompts, history_roles):
+            if role == "user":
+                former_multi_round_conversations += f"[用户]\n{prompt}\n"
+            elif role == "assistant":
+                former_multi_round_conversations += f"[您]\n{prompt}\n"
+            else:
+                raise RuntimeError
 
-        # 格式化用户回复历史
-        original_prompt = all_prompts[0]
-        
-        formatted_user_replies = ""
-        if len(all_prompts) <= 1:
-            formatted_user_replies = "（暂无后续补充）"
-        else:
-            # 合并后续回复
-            reply_text = "\n---\n".join(all_prompts[1:])
-            # 我们无法安全地将 'all_images' 中的图片与 'all_prompts[1:]' 
-            # 对应起来，只能将所有图片传递给 LLM。
-            formatted_user_replies = reply_text
-
-        # 2. 定义 Prompt
         prompt = f"""
 您是一个严谨的物理问题审查助手。
-您的任务是与用户互动，以确认从他们那里收集到的题目信息是否完整、正确，并且适合 AI 解答。
+您的任务是与用户互动，以确认从他们那里收集到的题目信息是否完整、正确，并且适合 AI 解答，最终传入飞书。
 
 # 1. 核心规则
 - **严禁解题**：您的工作是审查，不是解答。
 - **严禁画图**：AI 无法创建或绘制图像。如果题目或答案要求画图，必须拒绝。
-- **答案中不能有图**：答案（answer）必须是纯文本。
+- **答案应当整全**：答案（answer）必须是纯文本、不能有图，并且在小问的数量和形式上应该和题目相对应（如果题目有多小问）。
+- **图文组合**：`problem_text`（题干文本）和 `problem_images`（题干图片）共同构成了完整的题目。图片将按顺序附加在文本下方。
+- **图片数量固定**：题目相关的图片（problem_images）一经上传，其数量（当前为 {problem_image_num} 张）和顺序便已固定，AI 无法增删或修改。
 
 # 2. 当前已整理的信息
+
+## 题干图片 (problem_images)
+当前共有 {problem_image_num} 张图片。它们将按顺序附加在题干文本之后。
 
 ## 题干 (problem_text)
 {problem_text}
 
-## 题干图片 (problem_images)
-{formatted_problem_images}
-
 ## 参考答案 (answer)
 {answer}
 
-# 3. 用户互动历史 (用于本次审查)
+**公式格式提醒**：
+以上 `problem_text` 和 `answer` 中的所有数学公式（无论行内或行间）都必须用 {self.begin_of_equation} 和 {self.end_of_equation} 包裹。
+飞书的格式不区分行内公式和行间公式。因此，在处理换行时，您**可以**对排版进行微调，使其在飞书上显示更自然（例如，将原题中的独立行间公式，在包裹后自然地并入文本行中，使其成为行内公式）。
 
-## 用户的原始问题（已处理）
-{original_prompt}
+# 3. 之前的与用户互动历史
 
-## 用户的后续补充/回复
-{formatted_user_replies}
+{former_multi_round_conversations}
 
 # 4. 您的审查与行动任务
 
 请分析 "当前已整理的信息" 和 "用户的后续补充/回复"，然后决定您的行动。
-注意：用户传入的图片（<图片内容>）可能包含了题干图片和后续补充的图片。
 
 ## 任务 A：审查 AI 解答可行性
 1.  **画图检查**：`problem_text` 是否要求 AI **画图**？（例如：“请画出受力分析图”）如果要求，AI 无法完成。
-2.  **答案形式检查**：`answer` 是否是“暂无”？如果是，用户的新回复（`后续补充/回复`）是否正在提供答案？
-3.  **内容匹配检查**：`problem_text` 和 `answer` 的形式是否匹配？（例如：`problem_text` 要求“计算 A 和 B”，但 `answer` 只提供了 A）。
+2.  **答案形式检查**：`answer` 是否是“暂无”？如果是，用户的新回复是否正在提供答案？
+3.  **内容匹配检查 (题干 vs 答案)**：`problem_text` 和 `answer` 的形式是否匹配？（例如：`problem_text` 要求“计算 A 和 B”，但 `answer` 只提供了 A）。
+4.  **内容匹配检查 (题干 vs 图片)**：`problem_text` 和 `problem_images` 的组合是否在语义上完整？（例如：`problem_text` 是“如图所示”，但 `problem_image_num` 为 0）。
 
 ## 任务 B：解析用户回复
-1.  **用户是否在确认？**：如果 `后续补充/回复` 明显表示“是”、“确认”、“没问题”，并且您认为信息已完整，请设置 `succeeded = True`。
-2.  **用户是否在修正？**：如果 `后续补充/回复` 提供了新的题干或答案，请使用 `update_problem` 或 `update_answer`。
+1.  **用户是否在确认？**：如果 `后续补充/回复` 明显表示“是”、“确认”、“没问题”，并且您认为信息已完整（通过任务 A 审查），请设置 `succeeded = True`。
+2.  **用户是否在修正？**：如果 `后续补充/回复` 提供了新的题干或答案，请使用 `overwrite_problem_text` 或 `overwrite_answer`。
 
 ## 任务 C：决定下一步行动
 
-1.  **如果用户确认 (例如回复 "是的", "ok")**：
+1.  **如果用户确认 (例如回复 "是的", "ok") 且任务 A 审查通过**：
     - `succeeded = True`
-    - `actions = []` (不要回复)
+    - `actions = []` (无需回复，系统会自动回复消息，并进入后续流程)
 
 2.  **如果 AI 无法解答 (例如 "画图题")**：
     - `succeeded = False`
-    - `actions = [{{"reply_message": "抱歉，我无法处理需要画图的题目。请您提供一个新题目，或修改当前题目为不需画图的描述。"}} ]`
+    - `actions = [{{"reply_message": "抱歉，我无法处理需要画图的题目。请您重新在群聊中@我以唤起新话题，或修改当前题目为不需画图的描述。"}} ]`
 
-3.  **如果信息不匹配 (例如 "问题与答案不符")**：
+3.  **如果信息不匹配 (例如 "问题与答案不符" 或 "图文不符")**：
     - `succeeded = False`
-    - `actions = [{{"reply_message": "我发现题干和答案似乎不匹配（例如，问题数量与答案数量不符）。您能检查一下吗？"}} ]`
+    - (示例：图文不符) `actions = [{{"reply_message": "我发现题干中提到了图片（例如“如图”），但当前没有上传任何图片。您可以修改当前题目为不需画图的描述，或重新在群聊中@我以唤起新话题，并在创建话题时上传图片"}} ]`
+    - (示例：内容不符) `actions = [{{"reply_message": "我发现题干和答案似乎不匹配（例如，问题数量与答案数量不符）。您能检查一下吗？"}} ]`
 
-4.  **如果用户提供了修正 (例如提供了新答案)**：
+4.  **如果用户提供了修正 (例如提供了新答案或新题干)**：
     - `succeeded = False`
-    - **重要**：在 `update_problem` 和 `update_answer` 中，您**必须**包含所有必要的数学公式标记 `{self.begin_of_equation}` 和 `{self.end_of_equation}`。
+    - **重要：更新必须是完整的**：`overwrite_problem_text` 或 `overwrite_answer` 的值必须是**完整**的全新文本，用以**完全替换**旧的 `problem_text` 或 `answer`，而不是提供增量修改。
+    - **重要：公式格式**：在 `overwrite_problem_text` 和 `overwrite_answer` 的新文本中，**所有**数学公式（不区分行内/行间）都**必须**使用 `{self.begin_of_equation}` 和 `{self.end_of_equation}` 标记。
+    - **注意**：`overwrite_problem_text` 只更新文本部分。图片（{problem_image_num} 张）是固定的，无法通过此操作修改。
     - （示例）`actions = [
-        {{ "update_answer": "这是用户提供的新答案..." }},
-        {{"reply_message": "感谢您的补充/修正，请问现在信息完整且正确吗？"}}
+        {{ "overwrite_answer": "这是用户提供的{self.begin_of_equation}x=1{self.end_of_equation}新答案..." }},
+        {{"reply_message": "感谢您的补充/修正，我已在文档{self.begin_of_hyperlink}{document_id}{self.end_of_hyperlink}中更新；请问现在信息完整且正确吗？"}}
       ]`
 
 5.  **如果一切看起来都很好（首次审查）**：
     - `succeeded = False`
-    - `actions = [{{"reply_message": "我已经将您的题目整理完毕（如上所示）。请问题干、图片和答案是否都正确且完整？如果不是，请您补充。"}} ]`
+    - `actions = [{{"reply_message": "我已经将您的题目整理完毕（如上所示）。请问题干（、图片，如果有图片）和答案是否都正确且完整？如果不是，请您补充。"}} ]`
+    
+注意，当需要 reply_message 时，请阅读之前的与用户互动历史，确保向当前上下文添加的新消息是自然、符合语感的，同时尽可能保持角色设定一贯性。此外，reply_message 动作会在可能的 overwrite_problem_text 和 overwrite_answer 动作执行完后发生。
 
 # 5. 严格的输出格式
 
-您必须只返回一个 JSON 代码块，结构如下。
+您必须只返回一个 JSON 代码块（注意：请显式地将 JSON 代码块包裹在 ```json 和 ``` 之间），结构如下。
 
 ```json
 {{
   "succeeded": bool,
   "actions": [
-    {{ "reply_message": "string" }},
-    {{ "update_problem": "string" }},
-    {{ "update_answer": "string" }}
+    {{"reply_message": "string"}},
+    {{"overwrite_problem_text": "string"}},
+    {{"overwrite_answer": "string"}}
   ]
 }}
-````
+succeeded=True 时 actions 必须为 []。
 
-  - `succeeded=True` 时 `actions` 必须为 `[]`。
+succeeded=False 时 actions 必须包含至少一个 reply_message（可以同时包含 update 动作）。 
+"""
 
-  - `succeeded=False` 时 `actions` 必须包含至少一个 `reply_message`。
-    """
-
-      # 3. 定义 check_and_accept
-        result: Dict[str, Any] = {}
-        def check_and_accept_confirm(
+        result = {}
+        def check_and_accept(
             response: str,
         )-> bool:
             nonlocal result
-            print(f"这一次的 response (confirm) 是：\n{response}")
+            print(f"Confirm Problem: checking the following response now\n{response}")
             try:
-                halfway_result: Dict[str, Any] = {}
+                halfway_result = {}
                 json_pattern = r'```json\s*(.*?)\s*```'
-                # 优先使用 search，如果LLM返回裸JSON也能处理
-                matches = re.search(json_pattern, response, re.DOTALL)
-                
-                json_string = ""
-                if matches:
-                    json_string = matches.group(1).strip()
-                else:
-                    if response.strip().startswith("{"):
-                        json_string = response.strip()
-                    else:
-                        assert False, "Response is not JSON or JSON code block"
-                
+                matches = re.findall(json_pattern, response, re.DOTALL)
+                assert matches
+                json_string = matches[0].strip()
+                required_keys = ["succeeded", "actions"]
+                required_types = [bool, list]
                 json_dict = deserialize_json(json_string)
-                
-                # 检查根键
-                assert "succeeded" in json_dict
-                assert "actions" in json_dict
-                assert isinstance(json_dict["succeeded"], bool)
-                assert isinstance(json_dict["actions"], list)
-                
-                succeeded: bool = json_dict["succeeded"]
-                actions: List[Dict[str, Any]] = json_dict["actions"]
-                
-                halfway_result["succeeded"] = succeeded
-                halfway_result["actions"] = actions
-                
-                # 验证 Action 列表
-                has_reply = False
-                valid_keys = {"reply_message", "update_problem", "update_answer"}
-                
-                for action in actions:
-                    assert isinstance(action, dict)
-                    assert len(action.keys()) == 1, "Action dict must have exactly one key"
-                    action_key = list(action.keys())[0]
-                    action_value = list(action.values())[0]
-                    
-                    assert action_key in valid_keys, f"Invalid action key: {action_key}"
-                    assert isinstance(action_value, str), f"Action value must be string"
-                    
-                    if action_key == "reply_message":
-                        has_reply = True
-                
-                if succeeded:
-                    assert len(actions) == 0, "actions must be empty when succeeded=True"
+                for required_key, required_type in zip(required_keys, required_types):
+                    assert isinstance(json_dict[required_key], required_type)
+                    halfway_result[required_key] = json_dict[required_key]
+                for key in halfway_result["actions"]:
+                    if key == "reply_message":
+                        response = halfway_result["actions"]["reply_message"]
+                        assert isinstance(response, str)
+                        assert response.count(self.begin_of_hyperlink) == response.count(self.end_of_hyperlink)
+                    elif key == "overwrite_problem_text":
+                        assert isinstance(halfway_result["actions"]["overwrite_problem_text"], str)
+                    elif key == "overwrite_answer":
+                        assert isinstance(halfway_result["actions"]["overwrite_answer"], str)
+                    else:
+                        raise KeyError
+                if halfway_result["succeeded"]:
+                    assert len(halfway_result["actions"]) == 0
                 else:
-                    assert has_reply, "reply_message is required when succeeded=False"
-                
+                    assert "reply_message" in halfway_result["actions"]
                 result = halfway_result
                 return True
-            except Exception as error:
-                print(f"[check_and_accept_confirm] 验证失败: {error}")
+            except:
                 return False
-
-        # 4. 调用 LLM
+        
         _ = await get_answer_async(
             prompt = prompt,
             model = self._confirm_problem_model,
-            images = all_images, # 传入所有历史图片
+            images = problem_images + history_images,
             image_placeholder = self.image_placeholder,
             temperature = self._confirm_problem_temperature,
             timeout = self._confirm_problem_timeout,
             trial_num = self._confirm_problem_trial_num,
             trial_interval = self._confirm_problem_trial_interval,
-            check_and_accept = check_and_accept_confirm,
+            check_and_accept = check_and_accept,
         )
         
-        # 5. 执行 Actions
-        
-        actions: List[Dict[str, Any]] = result.get("actions", [])
-        
-        if result.get("succeeded", False):
-            print("[PkuPhyFermionBot] Problem confirmation succeeded.")
-            context["problem_confirmed"] = True
-        
-        # (无论是否 succeeded，都执行 actions)
-        
-        reply_message: Optional[str] = None
-        
-        for action in actions:
-            if "update_problem" in action:
-                new_problem_text = action["update_problem"]
-                print(f"[PkuPhyFermionBot] Updating problem_text to: {new_problem_text}")
-                context["problem_text"] = new_problem_text
-                # 警告：更新文档的逻辑很复杂，这里只更新了 context
-                # 理想情况下，还需要重新生成 problem_images
-            
-            if "update_answer" in action:
-                new_answer = action["update_answer"]
-                print(f"[PkuPhyFermionBot] Updating answer to: {new_answer}")
-                context["answer"] = new_answer
-                # 警告：需要更新文档
-            
-            if "reply_message" in action:
-                reply_message = action["reply_message"]
-
-        if reply_message:
-            await self.reply_message_async(
-                response = reply_message,
+        if result["succeeded"]:
+            await self._reply_message_in_context(
+                context = context,
+                response = "您提交的题目已入库；正在调用 AI 解答此题目...",
                 message_id = message_id,
-                reply_in_thread = True,
             )
+            return await self._try_to_solve_problem(
+                context = context,
+            )
+        else:
+            new_problem_text = result["actions"].get("overwrite_problem_text", None)
+            new_answer = result["actions"].get("overwrite_answer", None)
+            if new_problem_text or new_answer:
+                context["problem_text"] = problem_text
+                context["answer"] = new_answer
+                await self._sync_document_content_with_context(
+                    context = context,
+                )
+            response = result["actions"]["reply_message"]
+            response = response.replace(self.begin_of_equation, "$")
+            response = response.replace(self.end_of_equation, "$")
+            hyperlink_num = response.count(self.begin_of_hyperlink)
+            await self._reply_message_in_context(
+                context = context,
+                response = response,
+                message_id = message_id,
+                hyperlinks = [document_url] * hyperlink_num
+            )
+            return context
+    
+    
+    async def _reply_message_in_context(
+        self,
+        context: Dict[str, Any],
+        response: str,
+        message_id: str,
+        images: List[bytes] = [],
+        hyperlinks: List[str] = [],
+    )-> None:
+        
+        reply_message_result = await self.reply_message_async(
+            response = response,
+            message_id = message_id,
+            reply_in_thread = True,
+            images = images,
+            hyperlinks = hyperlinks,
+        )
+        if reply_message_result.success():
+            context["history"]["prompt"].append(response)
+            context["history"]["role"].append("assistant")
+        else:
+            raise RuntimeError
+    
+    
+    async def _try_to_solve_problem(
+        self,
+        context: Dict[str, Any],
+    )-> Dict[str, Any]:
         
         return context
-    
-    
-    
