@@ -700,7 +700,7 @@ succeeded=False 时 actions 必须包含至少一个 reply_message（可以同�
         )
         if reply_message_result.success():
             context["history"]["prompt"].append(response)
-            context["history"]["role"].append("assistant")
+            context["history"]["roles"].append("assistant")
         else:
             raise RuntimeError
     
