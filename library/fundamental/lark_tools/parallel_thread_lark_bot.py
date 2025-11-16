@@ -141,7 +141,7 @@ class ParallelThreadLarkBot(LarkBot):
                         queue.get(), 
                         timeout = self._worker_timeout,
                     )
-
+                    
                     if current_state is None:
                         current_state = await self.get_initial_context(thread_root_id)
                     new_state = await self.process_message_in_context(parsed_message, current_state)

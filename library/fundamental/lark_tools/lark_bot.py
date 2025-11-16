@@ -183,9 +183,9 @@ class LarkBot:
                 self.__class__,
                 self._init_arguments,
             ),
-            daemon = True,
+            daemon = False,
         )
-
+        
         with self._process_lock:
             self._spawned_processes.append(proc)
         

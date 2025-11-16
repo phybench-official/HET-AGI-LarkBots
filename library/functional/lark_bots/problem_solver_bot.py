@@ -48,6 +48,15 @@ class ProblemSolverBot(ParallelThreadLarkBot):
             context_cache_size = context_cache_size,
             max_workers = max_workers,
         )
+        
+        problem_solver_config = load_from_yaml(f"configs{seperator}problem_solver_config.yaml")
+        self._association_tenant = problem_solver_config["association_tenant"]
+        self._solve_problem_model = problem_solver_config["problem_solving"]["model"]
+        self._solve_problem_temperature = problem_solver_config["problem_solving"]["temperature"]
+        self._solve_problem_timeout = problem_solver_config["problem_solving"]["timeout"]
+        self._solve_problem_trial_num = problem_solver_config["problem_solving"]["trial_num"]
+        self._solve_problem_trial_interval = problem_solver_config["problem_solving"]["trial_interval"]
+        self._solve_problem_tool_use_trial_num = problem_solver_config["problem_solving"]["tool_use_trial_num"]
     
     
     def should_process(
@@ -96,14 +105,17 @@ class ProblemSolverBot(ParallelThreadLarkBot):
             prompt = problem_solver_prompt_template.format(text=text)
             response = await get_answer_async(
                 prompt = prompt,
-                model = "Qwen-VL-Max",
+                model = self._solve_problem_model,
+                temperature = self._solve_problem_temperature,
                 images = image_bytes_list,
                 image_placeholder = self.image_placeholder,
+                trial_num = self._solve_problem_trial_num,
+                trial_interval = self._solve_problem_trial_interval,
                 tools = [
                     python_tool(timeout=30, verbose=True),
                     wolfram_tool(timeout=60, verbose=True),
                 ],
-                tool_use_trial_num = 10,
+                tool_use_trial_num = self._solve_problem_tool_use_trial_num,
             )
         
         except Exception as error:
