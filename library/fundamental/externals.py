@@ -21,9 +21,9 @@ from ruamel.yaml import YAML as ruamel_yaml
 from concurrent.futures import ThreadPoolExecutor
 from collections import OrderedDict
 from pywheels import get_answer
-from pywheels.llm_tools.get_answer import get_answer_async
-# from pywheels import run_tasks_concurrently
-# from pywheels import run_tasks_concurrently_async
+from pywheels import get_answer_async
+from pywheels import run_tasks_concurrently
+from pywheels import run_tasks_concurrently_async
 from pywheels.miscellaneous import get_time_stamp
 
 
@@ -53,6 +53,6 @@ __all__ = [
     "OrderedDict",
     "normalvariate",
     "ThreadPoolExecutor",
-    # "run_tasks_concurrently",
-    # "run_tasks_concurrently_async",
+    "run_tasks_concurrently",
+    "run_tasks_concurrently_async",
 ]
