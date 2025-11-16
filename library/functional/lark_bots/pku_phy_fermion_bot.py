@@ -14,6 +14,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         worker_timeout: float = 600.0,
         context_cache_size: int = 1024,
         max_workers: Optional[int] = None,
+        config_path: str = f"configs{seperator}pku_phy_fermion_config.yaml",
     )-> None:
 
         super().__init__(
@@ -28,7 +29,18 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         
         self._mention_me_text = f"@{self._name}"
         
-        pku_phy_fermion_config = load_from_yaml(f"configs{seperator}pku_phy_fermion_config.yaml")
+        self._next_problem_no = 1
+        self._next_problem_no_lock = asyncio.Lock()
+        
+        self._load_config(config_path)
+        
+        
+    def _load_config(
+        self,
+        config_path: str,
+    )-> None:
+        
+        pku_phy_fermion_config = load_from_yaml(config_path)
         self._association_tenant = pku_phy_fermion_config["association_tenant"]
         self._problem_set_folder_token = pku_phy_fermion_config["problem_set_folder_token"]
         self._understand_problem_model = pku_phy_fermion_config["problem_understanding"]["model"]
@@ -46,11 +58,8 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         self._archive_problem_timeout = pku_phy_fermion_config["problem_archiving"]["timeout"]
         self._archive_problem_trial_num = pku_phy_fermion_config["problem_archiving"]["trial_num"]
         self._archive_problem_trial_interval = pku_phy_fermion_config["problem_archiving"]["trial_interval"]
-        
-        self._next_problem_no = 1
-        self._next_problem_no_lock = asyncio.Lock()
-        
-        
+    
+    
     async def _get_problem_no(
         self,
     )-> int:
@@ -124,8 +133,8 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             "AI_solver_succeeded": None,
             "comment_on_AI_solution": None,
         }
-        
-        
+    
+    
     # 仅简单消息、复杂消息和纯图片消息可调用
     async def _maintain_context_history(
         self,
@@ -251,38 +260,19 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
                 document_id = document_id,
             )
             
-            content = ""
-            content += f"{self.begin_of_third_heading}题目{self.end_of_third_heading}"
-            content += problem_text.strip()
-            content += self.divider_placeholder
-            content += f"{self.begin_of_third_heading}参考答案{self.end_of_third_heading}"
-            content += answer.strip()
-            content += self.divider_placeholder
-            content += f"{self.begin_of_third_heading}AI 解答过程{self.end_of_third_heading}"
-            content += "暂无"
-            content += self.divider_placeholder
-            content += f"{self.begin_of_third_heading}备注{self.end_of_third_heading}"
-            content += f"暂无"
-            
-            blocks = self.build_document_blocks(
-                content = content,
-            )
-            await self.overwrite_document_async(
-                document_id = document_id,
-                blocks = blocks,
-                images = problem_images,
-                existing_block_num = 0,
-            )
-
             context["document_created"] = True
             context["document_id"] = document_id
             context["document_title"] = document_title
             context["document_url"] = document_url
-            context["document_block_num"] = len(blocks)
+            context["document_block_num"] = 0
             context["problem_no"] = problem_no
             context["problem_text"] = problem_text
             context["problem_images"] = problem_images
             context["answer"] = answer
+            
+            await self._sync_document_content_with_context(
+                context = context,
+            )
             
             await self.reply_message_async(
                 response = f"您的题目已整理进文档{self.begin_of_hyperlink}{document_title}{self.end_of_hyperlink}，正在进一步处理中，请稍等...",
@@ -290,9 +280,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
                 reply_in_thread = True,
                 hyperlinks = [document_url]
             )
-            
-            raise NotImplementedError
-            
+
             return await self._try_to_confirm_problem(
                 context = context,
                 prompt = context["history"]["prompt"],
@@ -303,9 +291,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             )
 
         elif not context["problem_confirmed"]:
-            
-            raise NotImplementedError
-            
+                    
             return await self._try_to_confirm_problem(
                 context = context,
                 prompt = context["history"]["prompt"],
@@ -457,6 +443,44 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         del result["problem_image_indices"]
         
         return result
+    
+    
+    async def _sync_document_content_with_context(
+        self,
+        context: Dict[str, Any],
+    )-> None:
+        
+        document_id = context["document_id"]
+        document_block_num = context["document_block_num"]
+        problem_text = context["problem_text"]
+        problem_images = context["problem_images"]
+        answer = context["answer"]
+        
+        content = ""
+        content += f"{self.begin_of_third_heading}题目{self.end_of_third_heading}"
+        content += problem_text.strip()
+        content += self.divider_placeholder
+        content += f"{self.begin_of_third_heading}参考答案{self.end_of_third_heading}"
+        content += answer.strip()
+        content += self.divider_placeholder
+        content += f"{self.begin_of_third_heading}AI 解答过程{self.end_of_third_heading}"
+        content += "暂无"
+        content += self.divider_placeholder
+        content += f"{self.begin_of_third_heading}备注{self.end_of_third_heading}"
+        content += f"暂无"
+        
+        blocks = self.build_document_blocks(
+            content = content,
+        )
+        await self.overwrite_document_async(
+            document_id = document_id,
+            blocks = blocks,
+            images = problem_images,
+            existing_block_num = document_block_num,
+        )
+        context["document_block_num"] = len(blocks)
+        
+        return None
     
     
     async def _try_to_confirm_problem(
