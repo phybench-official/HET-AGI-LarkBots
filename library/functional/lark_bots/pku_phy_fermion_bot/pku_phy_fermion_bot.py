@@ -33,10 +33,11 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         self._acceptance_cache: OrderedDict[str, bool] = OrderedDict()
         
         self._mention_me_text = f"@{self._name}"
-        self._render_equation_async = lambda text: render_equation_async(
+        self._render_equation_async = lambda text, **inference_arguments: render_equation_async(
             text = text,
             begin_of_equation = self.begin_of_equation,
             end_of_equation = self.end_of_equation,
+            **inference_arguments,
         )
         
         self._next_problem_no = 1
@@ -50,30 +51,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         config_path: str,
     )-> None:
         
-        pku_phy_fermion_config = load_from_yaml(config_path)
-        self._association_tenant = pku_phy_fermion_config["association_tenant"]
-        self._problem_set_folder_token = pku_phy_fermion_config["problem_set_folder_token"]
-        self._understand_problem_model = pku_phy_fermion_config["problem_understanding"]["model"]
-        self._understand_problem_temperature = pku_phy_fermion_config["problem_understanding"]["temperature"]
-        self._understand_problem_timeout = pku_phy_fermion_config["problem_understanding"]["timeout"]
-        self._understand_problem_trial_num = pku_phy_fermion_config["problem_understanding"]["trial_num"]
-        self._understand_problem_trial_interval = pku_phy_fermion_config["problem_understanding"]["trial_interval"]
-        self._confirm_problem_model = pku_phy_fermion_config["problem_confirming"]["model"]
-        self._confirm_problem_temperature = pku_phy_fermion_config["problem_confirming"]["temperature"]
-        self._confirm_problem_timeout = pku_phy_fermion_config["problem_confirming"]["timeout"]
-        self._confirm_problem_trial_num = pku_phy_fermion_config["problem_confirming"]["trial_num"]
-        self._confirm_problem_trial_interval = pku_phy_fermion_config["problem_confirming"]["trial_interval"]
-        self._solve_problem_model = pku_phy_fermion_config["problem_solving"]["model"]
-        self._solve_problem_temperature = pku_phy_fermion_config["problem_solving"]["temperature"]
-        self._solve_problem_timeout = pku_phy_fermion_config["problem_solving"]["timeout"]
-        self._solve_problem_trial_num = pku_phy_fermion_config["problem_solving"]["trial_num"]
-        self._solve_problem_trial_interval = pku_phy_fermion_config["problem_solving"]["trial_interval"]
-        self._solve_problem_tool_use_trial_num = pku_phy_fermion_config["problem_solving"]["tool_use_trial_num"]
-        self._archive_problem_model = pku_phy_fermion_config["problem_archiving"]["model"]
-        self._archive_problem_temperature = pku_phy_fermion_config["problem_archiving"]["temperature"]
-        self._archive_problem_timeout = pku_phy_fermion_config["problem_archiving"]["timeout"]
-        self._archive_problem_trial_num = pku_phy_fermion_config["problem_archiving"]["trial_num"]
-        self._archive_problem_trial_interval = pku_phy_fermion_config["problem_archiving"]["trial_interval"]
+        self._config = load_from_yaml(config_path)
     
     
     async def _get_problem_no(
@@ -334,22 +312,37 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             
             assert len(context["history"]["prompt"]) == 1
             message = context["history"]["prompt"][0]
+            message = message.replace(self.image_placeholder, "")
             problem_images = context["history"]["images"]
             understand_problem_result = await understand_problem_async(
                 message = message,
                 problem_images = problem_images,
-                model = self._understand_problem_model,
-                temperature = self._understand_problem_temperature,
-                timeout = self._understand_problem_timeout,
-                trial_num = self._understand_problem_trial_num,
-                trial_interval = self._understand_problem_trial_interval,
+                model = self._config["problem_understanding"]["model"],
+                temperature = self._config["problem_understanding"]["temperature"],
+                timeout = self._config["problem_understanding"]["timeout"],
+                trial_num = self._config["problem_understanding"]["trial_num"],
+                trial_interval = self._config["problem_understanding"]["trial_interval"],
             )
             problem_title = understand_problem_result["problem_title"]
             problem_text = understand_problem_result["problem_text"]
             answer = understand_problem_result["answer"]
             
-            problem_text_rendering_coroutine = self._render_equation_async(problem_text)
-            answer_rendering_coroutine = self._render_equation_async(answer)
+            problem_text_rendering_coroutine = self._render_equation_async(
+                text = problem_text,
+                model = self._config["equation_rendering"]["model"],
+                temperature = self._config["equation_rendering"]["temperature"],
+                timeout = self._config["equation_rendering"]["timeout"],
+                trial_num = self._config["equation_rendering"]["trial_num"],
+                trial_interval = self._config["equation_rendering"]["trial_interval"],
+            )
+            answer_rendering_coroutine = self._render_equation_async(
+                text = answer,
+                model = self._config["equation_rendering"]["model"],
+                temperature = self._config["equation_rendering"]["temperature"],
+                timeout = self._config["equation_rendering"]["timeout"],
+                trial_num = self._config["equation_rendering"]["trial_num"],
+                trial_interval = self._config["equation_rendering"]["trial_interval"],
+            )
             problem_text = await problem_text_rendering_coroutine
             answer = await answer_rendering_coroutine
             
@@ -357,10 +350,10 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             document_title = f"[题目 {problem_no}] {problem_title}"
             document_id = await self.create_document_async(
                 title = document_title,
-                folder_token = self._problem_set_folder_token,
+                folder_token = self._config["problem_set_folder_token"],
             )
             document_url = get_lark_document_url(
-                tenant = self._association_tenant,
+                tenant = self._config["association_tenant"],
                 document_id = document_id,
             )
             
@@ -425,11 +418,11 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             problem_images = problem_images,
             answer = answer,
             history = history,
-            model = self._confirm_problem_model,
-            temperature = self._confirm_problem_temperature,
-            timeout = self._confirm_problem_timeout,
-            trial_num = self._confirm_problem_trial_num,
-            trial_interval = self._confirm_problem_trial_interval,
+            model = self._config["problem_confirming"]["model"],
+            temperature = self._config["problem_confirming"]["temperature"],
+            timeout = self._config["problem_confirming"]["timeout"],
+            trial_num = self._config["problem_confirming"]["trial_num"],
+            trial_interval = self._config["problem_confirming"]["trial_interval"],
         )
         
         new_problem_text = confirm_problem_result["new_problem_text"]
@@ -437,9 +430,23 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         succeeded = confirm_problem_result["succeeded"]
         response = confirm_problem_result["response"]
         
-        problem_text_rendering_coroutine = self._render_equation_async(new_problem_text) \
+        problem_text_rendering_coroutine = self._render_equation_async(
+            text = new_problem_text,
+            model = self._config["equation_rendering"]["model"],
+            temperature = self._config["equation_rendering"]["temperature"],
+            timeout = self._config["equation_rendering"]["timeout"],
+            trial_num = self._config["equation_rendering"]["trial_num"],
+            trial_interval = self._config["equation_rendering"]["trial_interval"],
+        ) \
             if new_problem_text else None
-        answer_rendering_coroutine = self._render_equation_async(new_answer) \
+        answer_rendering_coroutine = self._render_equation_async(
+            text = new_answer,
+            model = self._config["equation_rendering"]["model"],
+            temperature = self._config["equation_rendering"]["temperature"],
+            timeout = self._config["equation_rendering"]["timeout"],
+            trial_num = self._config["equation_rendering"]["trial_num"],
+            trial_interval = self._config["equation_rendering"]["trial_interval"],
+        ) \
             if new_answer else None
         if problem_text_rendering_coroutine or answer_rendering_coroutine:
             if problem_text_rendering_coroutine:
@@ -460,6 +467,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             context["problem_confirmed"] = True
             return await self._try_to_solve_problem(
                 context = context,
+                message_id = message_id,
             )
         else:
             return context
@@ -468,9 +476,8 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
     async def _try_to_solve_problem(
         self,
         context: Dict[str, Any],
+        message_id: str,
     )-> Dict[str, Any]:
-        
-        message_id = context["message_id"]
         
         await self._reply_message_in_context(
             context = context,
