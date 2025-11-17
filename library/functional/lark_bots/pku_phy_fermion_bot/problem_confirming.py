@@ -11,6 +11,11 @@ async def confirm_problem_async(
     problem_images: List[bytes],
     answer: str,
     history: Dict[str, List[Any]],
+    model: str,
+    temperature: float,
+    timeout: int,
+    trial_num: int,
+    trial_interval: int,
 )-> Dict[str, Any]:
     
     """

@@ -33,6 +33,11 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         self._acceptance_cache: OrderedDict[str, bool] = OrderedDict()
         
         self._mention_me_text = f"@{self._name}"
+        self._render_equation_async = lambda text: render_equation_async(
+            text = text,
+            begin_of_equation = self.begin_of_equation,
+            end_of_equation = self.end_of_equation,
+        )
         
         self._next_problem_no = 1
         self._next_problem_no_lock = asyncio.Lock()
@@ -187,7 +192,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
     )-> None:
         
         """
-        兼有回复消息&维护 context 中 history 两个功能
+        兼有回复消息、维护 context 中 history 两个功能
         """
         
         reply_message_result = await self.reply_message_async(
@@ -202,7 +207,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             context["history"]["roles"].append("assistant")
         else:
             raise RuntimeError
-        
+    
         
     async def _sync_document_content_with_context(
         self,
@@ -246,7 +251,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         context["document_block_num"] = len(blocks)
         
         return None
-    
+
     
     async def process_message_in_context(
         self,
@@ -343,6 +348,11 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             problem_text = understand_problem_result["problem_text"]
             answer = understand_problem_result["answer"]
             
+            problem_text_rendering_coroutine = self._render_equation_async(problem_text)
+            answer_rendering_coroutine = self._render_equation_async(answer)
+            problem_text = await problem_text_rendering_coroutine
+            answer = await answer_rendering_coroutine
+            
             problem_no = await self._get_problem_no()
             document_title = f"[题目 {problem_no}] {problem_title}"
             document_id = await self.create_document_async(
@@ -399,9 +409,6 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             return context
     
     
-    
-    
-    
     async def _try_to_confirm_problem(
         self,
         context: Dict[str, Any],
@@ -418,6 +425,11 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             problem_images = problem_images,
             answer = answer,
             history = history,
+            model = self._confirm_problem_model,
+            temperature = self._confirm_problem_temperature,
+            timeout = self._confirm_problem_timeout,
+            trial_num = self._confirm_problem_trial_num,
+            trial_interval = self._confirm_problem_trial_interval,
         )
         
         new_problem_text = confirm_problem_result["new_problem_text"]
@@ -425,27 +437,19 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         succeeded = confirm_problem_result["succeeded"]
         response = confirm_problem_result["response"]
         
-        if new_problem_text or new_answer:
-            if new_problem_text:
-                problem_text_rendering_coroutine = render_equation_async(
-                    text = problem_text,
-                    begin_of_equation = self.begin_of_equation,
-                    end_of_equation = self.end_of_equation,
-                )
-            if new_answer:
-                answer_rendering_coroutine = render_equation_async(
-                    text = answer,
-                    begin_of_equation = self.begin_of_equation,
-                    end_of_equation = self.end_of_equation,
-                )
-            if new_problem_text:
-                context["problem_text"] = await problem_text_rendering_coroutine # type: ignore
-            if new_answer:
-                context["answer"] = await answer_rendering_coroutine # type: ignore
+        problem_text_rendering_coroutine = self._render_equation_async(new_problem_text) \
+            if new_problem_text else None
+        answer_rendering_coroutine = self._render_equation_async(new_answer) \
+            if new_answer else None
+        if problem_text_rendering_coroutine or answer_rendering_coroutine:
+            if problem_text_rendering_coroutine:
+                context["problem_text"] = await problem_text_rendering_coroutine
+            if answer_rendering_coroutine:
+                context["answer"] = await answer_rendering_coroutine
             await self._sync_document_content_with_context(
                 context = context,
             )
-            
+        
         await self._reply_message_in_context(
             context = context,
             response = response,
@@ -458,7 +462,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
                 context = context,
             )
         else:
-            return  context
+            return context
     
     
     async def _try_to_solve_problem(
