@@ -216,7 +216,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         content += AI_solution.strip()
         content += self.divider_placeholder
         content += f"{self.begin_of_third_heading}备注{self.end_of_third_heading}"
-        content += f"暂无"
+        content += f"暂无；未来会在这里记录解题工具调用情况、教师评价等信息"
         
         blocks = self.build_document_blocks(
             content = content,
@@ -311,6 +311,13 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         
         if not context["document_created"]:
             
+            # 这句话不记录在会话历史中
+            await self.reply_message_async(
+                response = "您的题目已受理，请稍候...",
+                message_id = message_id,
+                reply_in_thread = True,
+            )
+            
             assert len(context["history"]["prompt"]) == 1
             message = context["history"]["prompt"][0]
             message = message.replace(self.image_placeholder, "")
@@ -393,7 +400,10 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             raise RuntimeError
         
         elif not context["problem_archived"]:
-            raise NotImplementedError
+            return await self._try_to_archive_problem(
+                context = context,
+                message_id = message_id,
+            )
         
         else:
             await self.reply_message_async(
@@ -493,7 +503,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             message_id = message_id,
         )
         
-        AI_solution = await solve_problem_async(
+        solve_problem_result = await solve_problem_async(
             problem_text = problem_text,
             problem_images = problem_images,
             model = self._config["problem_solving"]["model"],
@@ -502,6 +512,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             trial_num = self._config["problem_solving"]["trial_num"],
             trial_interval = self._config["problem_solving"]["trial_interval"],
         )
+        AI_solution = solve_problem_result["AI_solution"]
         
         AI_solution = await self._render_equation_async(
             text = AI_solution,

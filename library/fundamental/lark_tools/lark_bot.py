@@ -35,7 +35,7 @@ def get_lark_document_url(
     return lark_document_url
 
 
-never_used_string = f"114514_{get_time_stamp(show_minute=True, show_second=True)}"
+never_used_string = f"never_used"
 class LarkBot:
     
     text_block_type = 2
