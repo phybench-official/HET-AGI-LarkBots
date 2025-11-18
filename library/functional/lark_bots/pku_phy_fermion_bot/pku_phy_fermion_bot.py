@@ -43,6 +43,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         self._next_problem_no = 1
         self._next_problem_no_lock = asyncio.Lock()
         
+        self._config_path = config_path
         self._load_config(config_path)
         
         
@@ -52,6 +53,22 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
     )-> None:
         
         self._config = load_from_yaml(config_path)
+        
+        
+    async def _reload_config_async(
+        self
+    )-> str:
+
+        loop = asyncio.get_running_loop()
+        try:
+            new_config = await loop.run_in_executor(
+                None, 
+                partial(load_from_yaml, self._config_path)
+            )
+            self._config = new_config
+            return json.dumps(new_config, indent=4, ensure_ascii=False)
+        except Exception as e:
+            return f"配置更新失败，错误信息:\n{str(e)}"
     
     
     async def _get_problem_no(
@@ -212,7 +229,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         content += f"{self.begin_of_third_heading}参考答案{self.end_of_third_heading}"
         content += answer.strip()
         content += self.divider_placeholder
-        content += f"{self.begin_of_third_heading}AI 解答过程{self.end_of_third_heading}"
+        content += f"{self.begin_of_third_heading}AI 解答{self.end_of_third_heading}"
         content += AI_solution.strip()
         content += self.divider_placeholder
         content += f"{self.begin_of_third_heading}备注{self.end_of_third_heading}"
@@ -283,25 +300,39 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
                             reply_in_thread = True,
                         )
                     return context
-        # 私聊消息，返回教程
+        # 私聊消息
         else:
-            await self.reply_message_async(
-                response = "请在群聊中@我以发起我和您的专属话题~您可以拉一个我和您的小群，正在向您发送教程...",
-                message_id = message_id,
-            )
-            await self.reply_message_async(
-                response = self.image_placeholder * 5,
-                message_id = message_id,
-                images = [
-                    f"pictures{seperator}PKU_PHY_fermion{seperator}create_group_instructions{seperator}{no}.png"
-                    for no in range(1, 6)
-                ],
-            )
-            await self.reply_message_async(
-                response = "相关教程已发送，请您查阅！",
-                message_id = message_id,
-            )
-            return context
+            # 暂时没有做鉴权
+            if text.strip() == "/update_config":
+                await self.reply_message_async(
+                    response = "正在重新加载配置文件，请稍候...",
+                    message_id = message_id,
+                )
+                config_content = await self._reload_config_async()
+                await self.reply_message_async(
+                    response = f"配置更新完成！当前内存中的配置如下：\n```json\n{config_content}\n```",
+                    message_id = message_id,
+                )
+                return context
+            # 发送教程
+            else:
+                await self.reply_message_async(
+                    response = "请在群聊中@我以发起我和您的专属话题~您可以拉一个我和您的小群，正在向您发送教程...",
+                    message_id = message_id,
+                )
+                await self.reply_message_async(
+                    response = self.image_placeholder * 5,
+                    message_id = message_id,
+                    images = [
+                        f"pictures{seperator}PKU_PHY_fermion{seperator}create_group_instructions{seperator}{no}.png"
+                        for no in range(1, 6)
+                    ],
+                )
+                await self.reply_message_async(
+                    response = "相关教程已发送，请您查阅！",
+                    message_id = message_id,
+                )
+                return context
         
         print(f" -> [Worker] 收到任务: {text}，开始处理")
         await self._maintain_context_history(
@@ -407,7 +438,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         
         else:
             await self.reply_message_async(
-                response = "感谢您的参与！此话题将不再被受理；如有任何疑问，请联系志愿者~",
+                response = "感谢您的参与！此话题即将不被受理；如有任何疑问，请联系志愿者~",
                 message_id = message_id,
             )
             return context

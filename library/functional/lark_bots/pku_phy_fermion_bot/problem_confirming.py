@@ -36,7 +36,7 @@ async def confirm_problem_async(
     此环节不负责对齐至内部富文本格式以支持公式渲染的工作。
     """
     
-    image_placeholder = "<image_never_used>"
+    image_placeholder = "<image_never_used_114514_1919810>"
     
     # 格式化历史记录
     formatted_history = ""
@@ -65,12 +65,15 @@ Analyze the <current_state> and <dialog_history> to determine the next action.
 2. **Check Data Fidelity & logic**:
    - **Faithfulness**: Trust the user's answer generally.
    - **Sanity Check**: If the answer is clearly absurd (e.g., "1+1=5"), DO NOT auto-correct it to "2". Instead, politely ask the user if this is intended.
-   - If answer is "暂无", ask for it.
+   - **Missing Answer (CRITICAL)**: If `answer` is "暂无", you **CANNOT** start. You MUST ask for the standard answer.
+     - **Crucial Explanation**: Explain to the user that the answer is required ONLY for **completing the database record** and **future verification**.
+     - **Independence Guarantee**: Explicitly state that the AI solver works **INDEPENDENTLY** and will **NOT** see or use the user's answer to derive the solution.
 
 3. **The "Must Confirm" Rule (Crucial)**:
    - Even if `problem_text` and `answer` are complete, you MUST NOT start the solver (`succeeded=true`) automatically.
    - **Action**: You must present the current status (or point to the Cloud Doc) and ask: "Is this correct?" or "Shall I start?"
-   - Only set `succeeded=true` when the user explicitly says "Yes/Confirm/Start".
+   - **Blocking**: If `answer` is "暂无" AND the user says "Start", you MUST **REJECT** the request (`succeeded=false`) and ask for the answer (citing the reasons in Step 2).
+   - Only set `succeeded=true` when (Data is Complete) AND (User explicitly says "Yes/Confirm/Start").
 
 4. **Handling Updates**:
    - If the user updates text/answer:
@@ -79,7 +82,8 @@ Analyze the <current_state> and <dialog_history> to determine the next action.
      - Set `succeeded=false`.
 
 5. **Output Format**:
-   - JSON block with `new_problem_text`, `new_answer`, `succeeded`, `response`.
+   - Output MUST be explicitly wrapped in **```json and ```** code blocks.
+   - JSON keys: `new_problem_text`, `new_answer`, `succeeded`, `response`.
 </instruction>
 
 <examples>
@@ -158,7 +162,7 @@ Analyze the <current_state> and <dialog_history> to determine the next action.
         }}
         ```
     </example_4>
-    
+
     <example_5>
         <description>English interaction.</description>
         <input>
@@ -177,6 +181,25 @@ Analyze the <current_state> and <dialog_history> to determine the next action.
         }}
         ```
     </example_5>
+
+    <example_6>
+        <description>User urges start, answer missing -> Block, Ask, and Guarantee Independence.</description>
+        <input>
+        Problem: "Calculate velocity."
+        Answer: "暂无"
+        History: [User]: "快帮我做！"
+        </input>
+        <output>
+        <analysis>Answer missing. Must ask for it. Explain it's for archiving, not for cheating.</analysis>
+        ```json
+        {{
+            "new_problem_text": null,
+            "new_answer": null,
+            "succeeded": false,
+            "response": "为了确保题目的入库完整性以及方便后续核对，请您先提供参考答案。请放心，AI 将完全独立解题，我们不会向 AI 展示您的参考答案。"
+        }}
+        ```
+    </example_6>
 </examples>
 
 <current_state>
@@ -196,10 +219,11 @@ Analyze the <current_state> and <dialog_history> to determine the next action.
 </dialog_history>
 
 <principles_recap>
-1. **Confirmation**: NEVER `succeeded=true` without explicit "Yes/Start" from User.
-2. **Updates**: Use Cloud Doc as the reference point in `response`.
-3. **Faithfulness**: Don't auto-correct weird answers; ask politely.
-4. **Language**: Natural Chinese (or English if context demands).
+1. **Format**: Output JSON in ```json ... ``` block.
+2. **No Answer = No Start**: Ask for answer for **Archiving Only**. Guarantee **Independent Solving**.
+3. **Updates**: Use Cloud Doc as the reference point in `response`.
+4. **Faithfulness**: Don't auto-correct weird answers; ask politely.
+5. **Language**: Natural Chinese (or English if context demands).
 </principles_recap>
 
 Please generate the Analysis and JSON response now.

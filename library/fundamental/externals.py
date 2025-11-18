@@ -15,6 +15,7 @@ import multiprocessing
 from time import sleep
 from copy import deepcopy
 from functools import wraps
+from functools import partial
 from random import normalvariate
 from os.path import sep as seperator
 from ruamel.yaml import YAML as ruamel_yaml
@@ -35,6 +36,7 @@ __all__ = [
     "time",
     "wraps",
     "sleep",
+    "partial",
     "base64",
     "logging",
     "deepcopy",
