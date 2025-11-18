@@ -388,7 +388,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             problem_text = problem_text + len(problem_images) * self.image_placeholder
             
             problem_no = await self._get_problem_no()
-            document_title = f"[题目 {problem_no}] {problem_title}"
+            document_title = f"题目 {problem_no} | {problem_title}"
             document_id = await self.create_document_async(
                 title = document_title,
                 folder_token = self._config["problem_set_folder_token"],
