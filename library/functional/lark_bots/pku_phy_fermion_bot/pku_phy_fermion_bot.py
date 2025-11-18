@@ -123,7 +123,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             "problem_images": None,
             "answer": None,
             "AI_solver_finished": False,
-            "AI_solution": None,
+            "AI_solution": "暂无",
             "problem_archived": False,
             "AI_solver_succeeded": None,
             "comment_on_AI_solution": None,
@@ -203,6 +203,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         problem_text = context["problem_text"]
         problem_images = context["problem_images"]
         answer = context["answer"]
+        AI_solution = context["AI_solution"]
         
         content = ""
         content += f"{self.begin_of_third_heading}题目{self.end_of_third_heading}"
@@ -212,7 +213,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         content += answer.strip()
         content += self.divider_placeholder
         content += f"{self.begin_of_third_heading}AI 解答过程{self.end_of_third_heading}"
-        content += "暂无"
+        content += AI_solution.strip()
         content += self.divider_placeholder
         content += f"{self.begin_of_third_heading}备注{self.end_of_third_heading}"
         content += f"暂无"
@@ -372,7 +373,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
 
             await self._reply_message_in_context(
                 context = context,
-                response = f"您的题目已整理进文档{self.begin_of_hyperlink}{document_title}{self.end_of_hyperlink}，正在进一步处理中，请稍等...",
+                response = f"您的题目已整理进文档{self.begin_of_hyperlink}{document_title}{self.end_of_hyperlink}，正在进一步处理中，请稍候...",
                 message_id = message_id,
                 hyperlinks = [document_url],
             )
@@ -477,12 +478,68 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         self,
         context: Dict[str, Any],
         message_id: str,
-    )-> Dict[str, Any]:
+    ) -> Dict[str, Any]:
+        
+        """
+        调用 AI 进行解题，并渲染结果
+        """
+        
+        problem_text = context["problem_text"]
+        problem_images = context["problem_images"]
         
         await self._reply_message_in_context(
             context = context,
-            response = "暂时没有实现 AI 解题功能，敬请期待",
+            response = "正在调用 AI 尝试解题，请稍候...",
             message_id = message_id,
         )
+        
+        AI_solution = await solve_problem_async(
+            problem_text = problem_text,
+            problem_images = problem_images,
+            model = self._config["problem_solving"]["model"],
+            temperature = self._config["problem_solving"]["temperature"],
+            timeout = self._config["problem_solving"]["timeout"],
+            trial_num = self._config["problem_solving"]["trial_num"],
+            trial_interval = self._config["problem_solving"]["trial_interval"],
+        )
+        
+        AI_solution = await self._render_equation_async(
+            text = AI_solution,
+            model = self._config["equation_rendering"]["model"],
+            temperature = self._config["equation_rendering"]["temperature"],
+            timeout = self._config["equation_rendering"]["timeout"],
+            trial_num = self._config["equation_rendering"]["trial_num"],
+            trial_interval = self._config["equation_rendering"]["trial_interval"],
+        )
+        
+        context["AI_solution"] = AI_solution
+        context["AI_solver_finished"] = True
+
+        await self._sync_document_content_with_context(
+            context = context,
+        )
+        
+        await self._reply_message_in_context(
+            context = context,
+            response = "AI 已完成解答，云文档内容已更新，请您查阅！",
+            message_id = message_id,
+        )
+        
+        return context
+
+
+    async def _try_to_archive_problem(
+        self,
+        context: Dict[str, Any],
+        message_id: str,
+    ) -> Dict[str, Any]:
+        
+        await self._reply_message_in_context(
+            context = context,
+            response = "题目归档功能暂时未实现，流程到此结束。感谢您的使用！",
+            message_id = message_id,
+        )
+
+        context["problem_archived"] = True
         
         return context
