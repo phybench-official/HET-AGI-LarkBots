@@ -54,6 +54,16 @@ class ParallelThreadLarkBot(LarkBot):
         它启动异步循环和阻塞的 Websocket 客户端。
         """
         
+        try:
+            import uvloop # type: ignore ; make pylance happy on Windows
+            asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+            print("[ParallelThreadLarkBot] uvloop enabled successfully.")
+        except ImportError:
+            print("[ParallelThreadLarkBot] uvloop not found, falling back to standard asyncio.")
+        except Exception as e:
+            # 兼容 Windows (uvloop 不支持 Windows)
+            print(f"[ParallelThreadLarkBot] Could not enable uvloop (likely OS incompatibility): {e}")
+        
         self._async_loop = asyncio.new_event_loop()
         ready_event = threading.Event()
         self._async_thread = threading.Thread(
