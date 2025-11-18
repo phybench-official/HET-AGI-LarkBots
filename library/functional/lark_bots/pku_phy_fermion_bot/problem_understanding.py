@@ -30,46 +30,104 @@ async def understand_problem_async(
     此环节不负责对齐至内部富文本格式以支持公式渲染的工作。
     """
     
-    image_placeholder = "<image_never_used_114514_1919810>"
+    image_placeholder = "<image_never_used>"
     
+    # 采用 XML 结构 + 指令三明治 + Few-Shots (返回 JSON 格式)
     prompt = f"""
-您是一个专业的物理题目整理助手。
-您的任务是分析用户提供的文本和图像信息，提取关键内容，并将其结构化。
+<system_role>
+You are a professional Physics Problem Organizer.
+Your task is to FAITHFULLY extract and structure raw user input into a standardized format.
+You are NOT a solver; you are a librarian.
+</system_role>
 
-# 1. 核心任务
-阅读用户的输入（包含文本和图片），提取出题目标题、完整的题干描述以及参考答案。
+<instruction>
+Please analyze the content in <input_text> and extract information into a JSON object following these rules:
 
-# 2. 提取规则
-1.  **题目标题 (problem_title)**：
-    - 根据题干内容生成一个极简短的标题，概括题目涉及的核心物理知识点（例如：“动量守恒定律”、“带电粒子在磁场中运动”）。
-    - **约束**：标题必须是纯文本，**严禁**包含任何数学公式、LaTeX 代码或复杂符号。
-2.  **题干 (problem_text)**：
-    - 提取并整合完整的题目描述。
-    - **关于图片内容**：如果题目信息主要包含在图片中，您**不需要**将其强制转录为文字。完全可以使用“如图所示，...”或“请回答图中的问题”等自然语言描述来指代图片内容，只要上下文通顺即可。
-    - 保持原文的表达方式和语序。
-3.  **参考答案 (answer)**：
-    - 提取用户提供的参考答案或解析。
-    - **关键约束**：如果用户**未提供**任何形式的参考答案或解析，您必须将此字段设为 **"暂无"**。
-    - **严禁解题**：您只需提取现有的答案。如果用户没给答案，绝对不要自己去尝试计算或解答。
+1. **problem_title** (String):
+   - Generate a VERY SHORT, pure text title summarizing the physics concept (e.g., "Momentum Conservation").
+   - **Constraint**: Must be Plain Text. NO LaTeX. NO formulas. NO complex symbols.
 
-# 3. JSON 格式
-输出必须是严格的 JSON 格式。
+2. **problem_text** (String):
+   - Extract the full problem description.
+   - **Clean Up Prefix**: Remove meta-labels like "【题目】", "题目：", "Question:", or "题目是".
+   - **Separation**: If the input contains the answer, ensure `problem_text` ONLY contains the question part.
+   - **Image Flexibility**:
+     - The input **MAY or MAY NOT** contain images. Both cases are perfectly valid.
+     - **If Images Exist**: Do NOT transcribe/OCR them. Use natural phrases like "As shown in the figure" to refer to them.
+     - **If No Images**: Just process the text. Do NOT hallucinate phrases like "As shown in the figure" if there is no figure.
 
-# 4. 输出结构
-请返回一个 JSON 代码块（显式给出 ```json 和 ```），结构如下：
-```json
-{{
-  "problem_title": "string: 简短的纯文本标题",
-  "problem_text": "string: 完整的题干内容",
-  "answer": "string: 提取的答案 或 '暂无'"
-}}
-````
+3. **answer** (String):
+   - Extract the reference answer provided by the user.
+   - **CRITICAL - NO INFERENCE**: If the input is just a question, you are **STRICTLY FORBIDDEN** to solve it.
+   - If no answer is explicitly provided, this field MUST be "暂无".
+   - If the user provided an answer key, extract it here.
 
-现在，请处理以下用户输入（图片已作为上下文附带）：
+4. **Format**: Output MUST be explicitly wrapped in **```json and ```** code blocks.
+</instruction>
 
+<examples>
+    <example_1>
+        <input>
+        【题目】如图所示，求小车的加速度。
+        (User provided 1 image)
+        </input>
+        <output>
+        ```json
+        {{
+            "problem_title": "牛顿第二定律",
+            "problem_text": "如图所示，求小车的加速度。",
+            "answer": "暂无"
+        }}
+        ```
+        <note>Image exists -> Refer to it naturally. Prefix removed. No answer -> "暂无".</note>
+    </example_1>
+
+    <example_2>
+        <input>
+        Calculate the integral of x^2 from 0 to 1.
+        (No images provided)
+        </input>
+        <output>
+        ```json
+        {{
+            "problem_title": "Definite Integral",
+            "problem_text": "Calculate the integral of x^2 from 0 to 1.",
+            "answer": "暂无"
+        }}
+        ```
+        <note>No images -> Perfectly OK, just process text. STRICTLY FORBIDDEN TO SOLVE IT. Answer is "暂无".</note>
+    </example_2>
+
+    <example_3>
+        <input>
+        Question: What is the force?
+        Answer: F = ma.
+        (No images provided)
+        </input>
+        <output>
+        ```json
+        {{
+            "problem_title": "Force Definition",
+            "problem_text": "What is the force?",
+            "answer": "F = ma."
+        }}
+        ```
+        <note>Clean separation of Question and Answer.</note>
+    </example_3>
+</examples>
+
+<input_text>
 {message + len(problem_images) * image_placeholder}
+</input_text>
 
-请给出你的 json 处理结果：
+<principles_recap>
+1. **Format**: Explicitly use ```json ... ``` block.
+2. **Clean Text**: Remove prefixes. Separate Q & A.
+3. **Image Handling**: Refer to images IF present; otherwise just handle text. No OCR.
+4. **NO INFERENCE**: If answer is missing, write "暂无". **STRICTLY FORBIDDEN TO SOLVE.**
+</principles_recap>
+
+Please generate the JSON response now.
 """
 
     result = {}
@@ -83,9 +141,17 @@ async def understand_problem_async(
             halfway_result = {}
             json_pattern = r'```json\s*(.*?)\s*```'
             matches = re.findall(json_pattern, response, re.DOTALL)
-            assert matches
             
-            json_string = matches[0].strip()
+            if not matches:
+                # Fallback: try to parse raw JSON if markdown tags are missing
+                try:
+                    deserialize_json(response.strip())
+                    json_string = response.strip()
+                except:
+                    return False
+            else:
+                json_string = matches[0].strip()
+            
             json_dict = deserialize_json(json_string)
             
             required_keys = ["problem_title", "problem_text", "answer"]
@@ -95,6 +161,11 @@ async def understand_problem_async(
                 # 简单的非空校验
                 assert len(json_dict[key]) > 0
             
+            # 简单的逻辑校验：title 不应包含 LaTeX 符号
+            # if "$" in json_dict["problem_title"] or "\\" in json_dict["problem_title"]:
+            #     print("Warning: LaTeX detected in problem_title, which should be pure text.")
+            #     return False 
+
             halfway_result["problem_title"] = json_dict["problem_title"]
             halfway_result["problem_text"] = json_dict["problem_text"]
             halfway_result["answer"] = json_dict["answer"]

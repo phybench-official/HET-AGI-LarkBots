@@ -25,40 +25,91 @@ async def render_equation_async(
     
     image_placeholder = "<image_never_used_114514_1919810>"
     
+    # 采用 XML 结构 + 指令三明治 + Few-Shots (JSON 格式)
     prompt = f"""
-您是一个专业的排版与公式渲染助手。
-您的任务是将输入的文本转换为符合特定富文本格式的字符串，重点是正确识别并包裹数学公式。
+<system_role>
+You are a professional typesetting and equation rendering assistant.
+Your goal is to format text for Feishu/Lark documents by correctly wrapping math formulas.
+</system_role>
 
-# 1. 核心任务
-读取输入的文本，识别其中**所有**的数学公式（包括行内公式、行间公式、独立的变量名、希腊字母、数字等数学符号），并使用指定的标记符号将其包裹。
+<instruction>
+Please process the content in <input_text> following these rules:
 
-# 2. 标记符号
-- 公式起始标记：{begin_of_equation}
-- 公式结束标记：{end_of_equation}
+1. **Identify Math**: Find ALL math formulas, variables (e.g., x, y, \\alpha), and equations.
+2. **Wrap with Tags**: Enclose identified math content between specific tags:
+   - Start Tag: {begin_of_equation}
+   - End Tag:   {end_of_equation}
+3. **Clean Delimiters**: You MUST REMOVE any existing LaTeX delimiters like `$`, `$$`, `\\(`, `\\)`, `\\[`, `\\]` from the original text. Do not keep them inside or outside the new tags.
+   - Wrong: {begin_of_equation}$$F=ma$${end_of_equation}
+   - Right: {begin_of_equation}F=ma{end_of_equation}
+4. **Avoid Over-processing**: DO NOT wrap:
+   - Normal English words or phrases.
+   - Code function names (e.g., "execute_mathematica", "print", "def").
+   - Units unless they are part of a formula.
+5. **Language Consistency**: **Strictly preserve the original language.**
+   - **Keep Chinese as Chinese.**
+   - **Keep English as English.**
+   - **Do NOT translate.**
+6. **Preserve Content**: Do not change the wording, summary, or logic. Only adjust formatting.
+7. **Format**: Output the result strictly as a JSON code block; **explicitly offer enclosing ```json and ```** for extraction convenience.
+</instruction>
 
-# 3. 规则与约束
-1.  **严禁篡改内容**：您必须严格保留原文的文字、数值和表达逻辑，不得进行翻译、摘要或纠错。您唯一能做的是添加包裹标记和微调换行。
-2.  **公式包裹**：
-    - 所有的 LaTeX 代码、数学表达式、单个数学变量（如 x, y, m）、希腊字母（如 \\alpha）都必须被包裹。
-    - 示例：原文 "公式 F=ma"，输出 "公式 {begin_of_equation}F=ma{end_of_equation}"。
-3.  **排版对齐 (换行)**：
-    - 目标平台（飞书云文档）完全不区分行内与行间公式。
-    - 如果原文本包含独立的行间公式，您**可以**适当地将其调整为行内形式；您也可以通过添加换行符的方式手动创建“行间公式”，使其在文档中阅读更加自然流畅。
-4.  **JSON 格式**：输出必须是严格的 JSON 格式。
+<examples>
+    <example_1>
+        <input>
+        这道题的答案是 $x = 5$。我们都知道 $$E = mc^2$$ 是很有名的公式。
+        </input>
+        <output>
+        ```json
+        {{
+            "rendered_text": "这道题的答案是 {begin_of_equation}x = 5{end_of_equation}。我们都知道 {begin_of_equation}E = mc^2{end_of_equation} 是很有名的公式。"
+        }}
+        ```
+        </output>
+        <note>Original language (Chinese) preserved. $ and $$ removed.</note>
+    </example_1>
 
-# 4. 输出结构
-请返回一个 JSON 代码块（显式给出 ```json 和 ```），结构如下：
-```json
-{{
-  "rendered_text": "string: 处理后的文本"
-}}
-````
+    <example_2>
+        <input>
+        Please run the function execute_mathematica to solve differential equation y' = y.
+        </input>
+        <output>
+        ```json
+        {{
+            "rendered_text": "Please run the function execute_mathematica to solve differential equation {begin_of_equation}y' = y{end_of_equation}."
+        }}
+        ```
+        </output>
+        <note>"execute_mathematica" is NOT wrapped because it is code/English. "y' = y" IS wrapped.</note>
+    </example_2>
 
-现在，你要处理的输入文本如下所示：
+    <example_3>
+        <input>
+        Let $\\alpha$ be the angle. The value is 10.
+        </input>
+        <output>
+        ```json
+        {{
+            "rendered_text": "Let {begin_of_equation}\\alpha{end_of_equation} be the angle. The value is 10."
+        }}
+        ```
+        </output>
+    </example_3>
+</examples>
 
+<input_text>
 {text}
+</input_text>
 
-请给出你的 json 处理结果：
+<principles_recap>
+1. Output format: JSON code block with key "rendered_text"; ensure explicit closure.
+2. **CRITICAL**: Remove old `$` or `$$` symbols completely.
+3. **CRITICAL**: Do NOT wrap code function names or plain English.
+4. **CRITICAL**: **Do NOT translate.** Keep Chinese as Chinese, English as English.
+5. **CRITICAL**: Wrap all actual math variables and equations with {begin_of_equation} and {end_of_equation}.
+</principles_recap>
+
+Please generate the JSON response now.
 """
 
     result = {}
@@ -72,13 +123,26 @@ async def render_equation_async(
             halfway_result = {}
             json_pattern = r'```json\s*(.*?)\s*```'
             matches = re.findall(json_pattern, response, re.DOTALL)
-            assert matches
             
-            json_string = matches[0].strip()
+            if not matches:
+                # Fallback: try to parse raw JSON if markdown tags are missing
+                try:
+                    deserialize_json(response.strip())
+                    json_string = response.strip()
+                except:
+                    return False
+            else:
+                json_string = matches[0].strip()
+            
             json_dict = deserialize_json(json_string)
             
             assert "rendered_text" in json_dict
             assert isinstance(json_dict["rendered_text"], str)
+            
+            # Ensure the output is not empty if input wasn't
+            if text.strip():
+                assert json_dict["rendered_text"].strip()
+            
             halfway_result["rendered_text"] = json_dict["rendered_text"]
             result = halfway_result
             return True

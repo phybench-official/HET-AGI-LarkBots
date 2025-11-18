@@ -23,7 +23,7 @@ async def solve_problem_async(
     此环节不负责对齐至内部富文本格式以支持公式渲染的工作。
     """
     
-    image_placeholder = "<image_never_used_114514_1919810>"
+    image_placeholder = "<image_never_used>"
     response = await get_answer_async(
         system_prompt = "请善用 execute_mathematica 工具",
         prompt = problem_text + len(problem_images) * image_placeholder,

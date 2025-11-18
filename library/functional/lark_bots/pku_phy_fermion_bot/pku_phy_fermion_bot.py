@@ -441,6 +441,9 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         succeeded = confirm_problem_result["succeeded"]
         response = confirm_problem_result["response"]
         
+        response = response.replace(self.begin_of_equation, "$")
+        response = response.replace(self.end_of_equation, "$")
+        
         problem_text_rendering_coroutine = self._render_equation_async(
             text = new_problem_text,
             model = self._config["equation_rendering"]["model"],
