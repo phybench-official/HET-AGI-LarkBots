@@ -3,6 +3,7 @@ import os
 import re
 import json
 import time
+import random
 import base64
 import logging
 import asyncio
@@ -36,6 +37,7 @@ __all__ = [
     "time",
     "wraps",
     "sleep",
+    "random",
     "partial",
     "base64",
     "logging",

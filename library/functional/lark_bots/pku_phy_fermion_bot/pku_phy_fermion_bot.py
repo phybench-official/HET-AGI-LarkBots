@@ -42,6 +42,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         
         self._next_problem_no = 1
         self._next_problem_no_lock = asyncio.Lock()
+        self._problem_id_to_context: Dict[int, Dict[str, Any]] = {}
         
         self._config_path = config_path
         self._load_config(config_path)
@@ -302,15 +303,18 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
                     return context
         # 私聊消息
         else:
+            # 鉴权
             try:
                 is_admin = parsed_message["sender"] in self._config["admin_open_ids"]
             except:
                 is_admin = False
+            # 指令处理
             if text.strip().startswith("/"):
                 await self._execute_command(
-                    command = text.strip(),
+                    command_line = text.strip(),
                     message_id = message_id,
                     is_admin = is_admin,
+                    sender_id = sender,
                 )
                 return context
             # 发送教程
@@ -407,13 +411,16 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             context["problem_text"] = problem_text
             context["problem_images"] = problem_images
             context["answer"] = answer
+            
+            self._problem_id_to_context[problem_no] = context
+            
             await self._sync_document_content_with_context(
                 context = context,
             )
 
             await self._reply_message_in_context(
                 context = context,
-                response = f"您的题目已整理进文档{self.begin_of_hyperlink}{document_title}{self.end_of_hyperlink}，正在进一步处理中，请稍候...",
+                response = f"您的题目已整理进文档{self.begin_of_hyperlink}{document_title}{self.end_of_hyperlink}，正在进一步处理中，请稍等...",
                 message_id = message_id,
                 hyperlinks = [document_url],
             )
@@ -594,67 +601,193 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
     
     async def _execute_command(
         self,
-        command: str,
+        command_line: str,
         message_id: str,
         is_admin: bool,
+        sender_id: Optional[str],
     )-> None:
         
-        rejection_message = f"抱歉，您没有权限执行指令\n{command}\n请联系管理员！"
-        not_implemented_message = f"以下指令：\n{command}\n正在施工中，暂未实现；敬请期待！"
+        args = command_line.split()
+        if not args: return
+        command = args[0].lower()
         
         if command == "/me":
-            await self.reply_message_async(
-                response = not_implemented_message,
-                message_id = message_id,
+            contribution_count = "N/A (暂无数据库)" 
+            role = "👑 管理员" if is_admin else "👤 普通用户"
+            response_text = (
+                f"📋 **用户档案 (User Profile)**\n"
+                f"━━━━━━━━━━━━━━━━\n"
+                f"🆔 **Open ID**: `{sender_id}`\n"
+                f"🛡️ **身份权限**: {role}\n"
+                f"🏆 **贡献题目**: `{contribution_count}`\n"
+                f"━━━━━━━━━━━━━━━━"
             )
-            return None
+            await self.reply_message_async(response_text, message_id)
+            return
+
         elif command == "/you":
-            await self.reply_message_async(
-                response = not_implemented_message,
-                message_id = message_id,
+            response_text = (
+                f"🤖 **北大物院-费米子活动机器人**\n"
+                f"━━━━━━━━━━━━━━━━\n"
+                f"🆔 **Bot ID**: `{self._open_id}`\n"
+                f"🧠 **内核版本**: PkuPhyFermionBot v0.1.0\n"
+                f"🏫 **所属单位**: 北京大学物理学院\n"
+                f"✨ **Slogan**: 像费米子一样，虽独一无二，却共同构建物质世界。\n"
+                f"━━━━━━━━━━━━━━━━"
             )
-            return None
-        elif command == "/stats":
-            await self.reply_message_async(
-                response = not_implemented_message,
-                message_id = message_id,
+            await self.reply_message_async(response_text, message_id)
+            return
+        
+        elif command == "/help":
+            help_text = (
+                "🛠️ **指令帮助列表**\n"
+                "━━━━━━━━━━━━━━━━\n"
+                "**用户指令**:\n"
+                "• `/me`: 查看个人档案与权限\n"
+                "• `/you`: 查看机器人信息\n"
+                "• `/help`: 获取此帮助菜单\n"
             )
-            return None
-        elif command.split()[0] == "/glance":
-            await self.reply_message_async(
-                response = not_implemented_message,
-                message_id = message_id,
-            )
-            return None
-        elif command.split()[0] == "/view":
-            await self.reply_message_async(
-                response = not_implemented_message,
-                message_id = message_id,
-            )
-            return None
-        elif command == "/update_config":
             if is_admin:
-                await self.reply_message_async(
-                    response = "正在重新加载配置文件，请稍候...",
-                    message_id = message_id,
+                help_text += (
+                    "\n**管理员指令**:\n"
+                    "• `/stats`: 查看题库统计\n"
+                    "• `/update_config`: 热更新配置\n"
+                    "• `/glance <start> <end>`: 批量概览题目\n"
+                    "• `/view {id|-1|random} [--verbose]`: 查看题目详情\n"
                 )
-                new_config_content = await self._reload_config_async(
-                    config_path = self._config_path,
-                )
-                await self.reply_message_async(
-                    response = f"配置更新完成！当前内存中的配置如下：\n# {self._config_path}\n{new_config_content}",
-                    message_id = message_id,
-                )
-                return None
+            help_text += "━━━━━━━━━━━━━━━━"
+            await self.reply_message_async(help_text, message_id)
+            return
+
+        elif command == "/stats":
+            if not is_admin:
+                await self.reply_message_async("🚫 **权限拒绝**: 该指令仅限管理员使用。", message_id)
+                return
+            
+            current_total = self._next_problem_no - 1
+            response_text = (
+                f"📊 **题库统计面板 (Admin)**\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"🔢 **入库总数**: `{current_total}` 题\n"
+                f"🆕 **最新编号**: `#{current_total}`\n"
+                f"📉 **今日新增**: N/A\n"
+                f"━━━━━━━━━━━━━━"
+            )
+            await self.reply_message_async(response_text, message_id)
+            return
+
+        elif command == "/update_config":
+            if not is_admin:
+                await self.reply_message_async("🚫 **权限拒绝**: 该指令仅限管理员使用。", message_id)
+                return
+            
+            await self.reply_message_async("🔄 正在重新加载配置文件，请稍候...", message_id)
+            result_content = await self._reload_config_async(self._config_path)
+            
+            response_text = (
+                f"✅ **配置更新完成！**\n"
+                f"📂 **来源**: `{self._config_path}`\n"
+                f"📄 **当前内容摘要**:\n"
+                f"```yaml\n{result_content[:1000]}...\n```\n"
+                f"(完整内容已加载至内存)"
+            )
+            await self.reply_message_async(response_text, message_id)
+            return
+
+        elif command == "/glance":
+            if not is_admin:
+                await self.reply_message_async("🚫 **权限拒绝**: 该指令仅限管理员使用。", message_id)
+                return
+            
+            if len(args) < 3:
+                await self.reply_message_async("⚠️ 参数错误。用法: `/glance <start_id> <end_id>`", message_id)
+                return
+            
+            try:
+                start_id = int(args[1])
+                end_id = int(args[2])
+            except ValueError:
+                await self.reply_message_async("⚠️ ID 必须是整数。", message_id)
+                return
+            
+            if end_id - start_id > 20:
+                await self.reply_message_async("⚠️ 为了避免消息过长，单次概览请不要超过 20 条。", message_id)
+                return
+            
+            response_lines = [f"📑 **题目概览 (#{start_id} - #{end_id})**"]
+            
+            for pid in range(start_id, end_id + 1):
+                ctx = self._problem_id_to_context.get(pid)
+                if ctx:
+                    doc_url = ctx.get("document_url", "链接未知")
+                    title = ctx.get("document_title", "无标题").split("|")[-1].strip()
+                    response_lines.append(f"• `#{pid}`: [{title}]({doc_url})")
+                else:
+                    response_lines.append(f"• `#{pid}`: ⚠️ (暂无数据，可能尚未加载)")
+                
+            await self.reply_message_async("\n".join(response_lines), message_id)
+            return
+
+        elif command == "/view":
+            if not is_admin:
+                await self.reply_message_async("🚫 **权限拒绝**: 该指令仅限管理员使用。", message_id)
+                return
+            
+            if len(args) < 2:
+                await self.reply_message_async("⚠️ 参数错误。用法: `/view {id|-1|random}`", message_id)
+                return
+            
+            target = args[1]
+            verbose = "--verbose" in args
+            
+            target_id = -1
+            if target == "-1":
+                target_id = self._next_problem_no - 1
+            elif target == "random":
+                if self._next_problem_no > 1:
+                    target_id = random.randint(1, self._next_problem_no - 1)
+                else:
+                    await self.reply_message_async("⚠️ 题库为空。", message_id)
+                    return
             else:
-                await self.reply_message_async(
-                    response = rejection_message,
-                    message_id = message_id,
+                try:
+                    target_id = int(target)
+                except ValueError:
+                    await self.reply_message_async("⚠️ ID 格式错误。", message_id)
+                    return
+            
+            if target_id >= self._next_problem_no or target_id <= 0:
+                await self.reply_message_async(f"⚠️ 题目 `#{target_id}` 不存在。", message_id)
+                return
+            target_context = self._problem_id_to_context.get(target_id)
+            
+            if target_context:
+                doc_title = target_context.get("document_title", "未知标题")
+                doc_url = target_context.get("document_url", "#")
+                status_icon = "✅" if target_context.get("problem_archived") else "⏳"
+                
+                response_text = (
+                    f"📄 **题目详情 #{target_id}**\n"
+                    f"━━━━━━━━━━━━━━\n"
+                    f"📑 **标题**: {doc_title}\n"
+                    f"🔗 **文档**: [点击跳转]({doc_url})\n"
+                    f"🚦 **状态**: {status_icon}\n"
+                    f"━━━━━━━━━━━━━━"
                 )
-                return None
+                
+                if verbose:
+                    debug_view = {k: v for k, v in target_context.items() if k != "history"}
+                    json_str = json.dumps(debug_view, indent=2, ensure_ascii=False, default=str)
+                    response_text += f"\n\n🔧 **Context Dump (Verbose)**:\n```json\n{json_str}\n```"
+            else:
+                response_text = f"⚠️ **查询失败**: 编号 `#{target_id}` 虽然在范围内，但内存中无此记录 (可能重启丢失)。"
+            
+            await self.reply_message_async(response_text, message_id)
+            return
+
         else:
             await self.reply_message_async(
-                response = f"未知指令：\n{command}",
+                response = f"⚠️ **未知指令**: `{command}`\n请输入 `/help` 查看可用指令列表。",
                 message_id = message_id,
             )
-            return None
+            return
