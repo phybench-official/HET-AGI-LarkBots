@@ -56,19 +56,19 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         
         
     async def _reload_config_async(
-        self
+        self,
+        config_path: str,
     )-> str:
 
-        loop = asyncio.get_running_loop()
         try:
-            new_config = await loop.run_in_executor(
-                None, 
-                partial(load_from_yaml, self._config_path)
+            new_config, new_config_content = await load_from_yaml_async(
+                file_path = config_path,
             )
             self._config = new_config
-            return json.dumps(new_config, indent=4, ensure_ascii=False)
-        except Exception as e:
-            return f"配置更新失败，错误信息:\n{str(e)}"
+            self._config_path = config_path
+            return new_config_content
+        except Exception as error:
+            return f"配置更新失败！\n错误信息:\n{str(error)}\n调用栈：\n{traceback.format_exc()}"
     
     
     async def _get_problem_no(
@@ -107,7 +107,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             # 是话题内消息，不知道对应的顶层消息怎样，需要处理
             else:
                 return True
-        # 私聊消息，返回教程
+        # 私聊消息，执行指令/返回教程
         else:
             return True
     
@@ -302,16 +302,15 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
                     return context
         # 私聊消息
         else:
-            # 暂时没有做鉴权
-            if text.strip() == "/update_config":
-                await self.reply_message_async(
-                    response = "正在重新加载配置文件，请稍候...",
+            try:
+                is_admin = parsed_message["sender"] in self._config["admin_open_ids"]
+            except:
+                is_admin = False
+            if text.strip().startswith("/"):
+                await self._execute_command(
+                    command = text.strip(),
                     message_id = message_id,
-                )
-                config_content = await self._reload_config_async()
-                await self.reply_message_async(
-                    response = f"配置更新完成！当前内存中的配置如下：\n```json\n{config_content}\n```",
-                    message_id = message_id,
+                    is_admin = is_admin,
                 )
                 return context
             # 发送教程
@@ -352,6 +351,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             assert len(context["history"]["prompt"]) == 1
             message = context["history"]["prompt"][0]
             message = message.replace(self.image_placeholder, "")
+            message = message.replace(self._mention_me_text, "")
             problem_images = context["history"]["images"]
             understand_problem_result = await understand_problem_async(
                 message = message,
@@ -535,7 +535,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         
         await self._reply_message_in_context(
             context = context,
-            response = "正在调用 AI 尝试解题，请稍候...",
+            response = "正在调用 AI 解题，请稍候...如果您的题目困难，AI 可能需要较长时间思考",
             message_id = message_id,
         )
         
@@ -590,3 +590,71 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         context["problem_archived"] = True
         
         return context
+    
+    
+    async def _execute_command(
+        self,
+        command: str,
+        message_id: str,
+        is_admin: bool,
+    )-> None:
+        
+        rejection_message = f"抱歉，您没有权限执行指令\n{command}\n请联系管理员！"
+        not_implemented_message = f"以下指令：\n{command}\n正在施工中，暂未实现；敬请期待！"
+        
+        if command == "/me":
+            await self.reply_message_async(
+                response = not_implemented_message,
+                message_id = message_id,
+            )
+            return None
+        elif command == "/you":
+            await self.reply_message_async(
+                response = not_implemented_message,
+                message_id = message_id,
+            )
+            return None
+        elif command == "/stats":
+            await self.reply_message_async(
+                response = not_implemented_message,
+                message_id = message_id,
+            )
+            return None
+        elif command.split()[0] == "/glance":
+            await self.reply_message_async(
+                response = not_implemented_message,
+                message_id = message_id,
+            )
+            return None
+        elif command.split()[0] == "/view":
+            await self.reply_message_async(
+                response = not_implemented_message,
+                message_id = message_id,
+            )
+            return None
+        elif command == "/update_config":
+            if is_admin:
+                await self.reply_message_async(
+                    response = "正在重新加载配置文件，请稍候...",
+                    message_id = message_id,
+                )
+                new_config_content = await self._reload_config_async(
+                    config_path = self._config_path,
+                )
+                await self.reply_message_async(
+                    response = f"配置更新完成！当前内存中的配置如下：\n# {self._config_path}\n{new_config_content}",
+                    message_id = message_id,
+                )
+                return None
+            else:
+                await self.reply_message_async(
+                    response = rejection_message,
+                    message_id = message_id,
+                )
+                return None
+        else:
+            await self.reply_message_async(
+                response = f"未知指令：\n{command}",
+                message_id = message_id,
+            )
+            return None

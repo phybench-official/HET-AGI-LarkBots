@@ -27,4 +27,4 @@ async def load_from_yaml_async(
     async with aiofiles.open(file_path, "r", encoding="utf-8") as file:
         content: str = await file.read()
     data = yaml_loader.load(content)
-    return data
+    return data, content

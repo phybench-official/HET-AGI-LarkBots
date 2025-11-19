@@ -92,11 +92,14 @@ class LarkBot:
             level = lark.LogLevel.DEBUG,
         )
         
-        self._text_elements_pattern = re.compile((
-            f"({re.escape(self.begin_of_equation)}"
-            f".*?"
-            f"{re.escape(self.end_of_equation)})"
-        ))
+        self._text_elements_pattern = re.compile(
+            (
+                f"({re.escape(self.begin_of_equation)}"
+                f".*?"
+                f"{re.escape(self.end_of_equation)})"
+            ), 
+            re.DOTALL,
+        )
         img_pattern = f"({re.escape(self.image_placeholder)})"
         divider_pattern = f"({re.escape(self.divider_placeholder)})"
         h1_pattern = (
@@ -115,7 +118,8 @@ class LarkBot:
             f"{re.escape(self.end_of_third_heading)})"
         )
         self._document_blocks_pattern = re.compile(
-            f"{img_pattern}|{divider_pattern}|{h1_pattern}|{h2_pattern}|{h3_pattern}"
+            f"{img_pattern}|{divider_pattern}|{h1_pattern}|{h2_pattern}|{h3_pattern}",
+            re.DOTALL,
         )
     
     
@@ -904,6 +908,7 @@ class LarkBot:
             if not part: continue
             if part.startswith(self.begin_of_equation):
                 eq_content = part[len(self.begin_of_equation):-len(self.end_of_equation)]
+                eq_content = eq_content.strip()
                 equation = Equation.builder().content(eq_content).build()
                 text_element = TextElement.builder().equation(equation).build()
                 elements.append(text_element)
@@ -999,14 +1004,17 @@ class LarkBot:
             # H1 title
             elif part.startswith(self.begin_of_first_heading):
                 text = part[len(self.begin_of_first_heading):-len(self.end_of_first_heading)]
+                text = text.strip()
                 blocks.append(self.build_heading_block(text, level=1))
             # H2 title
             elif part.startswith(self.begin_of_second_heading):
                 text = part[len(self.begin_of_second_heading):-len(self.end_of_second_heading)]
+                text = text.strip()
                 blocks.append(self.build_heading_block(text, level=2))
             # H3 title
             elif part.startswith(self.begin_of_third_heading):
                 text = part[len(self.begin_of_third_heading):-len(self.end_of_third_heading)]
+                text = text.strip()
                 blocks.append(self.build_heading_block(text, level=3))
             # text (possibly including equations)
             else:

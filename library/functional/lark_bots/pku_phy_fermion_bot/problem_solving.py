@@ -26,7 +26,7 @@ async def solve_problem_async(
     image_placeholder = "<image_never_used>"
     response = await get_answer_async(
         system_prompt = "请善用 execute_mathematica 工具",
-        prompt = problem_text + len(problem_images) * image_placeholder,
+        prompt = problem_text,
         model = model,
         images = problem_images,
         image_placeholder = image_placeholder,
