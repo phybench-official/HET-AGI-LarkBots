@@ -8,6 +8,7 @@ lark_api_keys.json
 wolfram_api_keys.json
 
 configs/
+logs/
 
 # Test case directory (all files)
 test_case/
