@@ -61,6 +61,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             "default": "快速获取基础解答",
             "deep_think": "启用慢思考模式，多角度分析",
         }
+        self._default_workflows: List[str] = ["default"]
     
     
     async def _get_problem_no(
@@ -135,25 +136,22 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             "thread_root_id": thread_root_id,
             "is_accepted": is_accepted,
             "owner": None,
-            
             "history": {
                 "prompt": [],
                 "images": [],
                 "roles": [],
             },
-            
             "problem_no": None,
             "problem_text": None,
             "problem_images": None,
             "answer": None,
-
             "document_created": False,
             "document_id": None,
             "document_title": None,
             "document_url": None,
             "document_block_num": None,
-            
             "trials": [], 
+            "running_workflows": 0,
             "is_archived": False,
         }
     
@@ -164,7 +162,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         context: Dict[str, Any],
     )-> None:
         
-        message_id: str = parsed_message["message_id"]
+        message_id = parsed_message["message_id"]
         text: str = parsed_message["text"]
         image_keys: List[str] = parsed_message["image_keys"]
         
@@ -247,7 +245,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         
         message_id = parsed_message["message_id"]
         await self.reply_message_async(
-            response = "您的题目已受理，请稍候...",
+            response = "您的题目已受理，正在解析并创建文档...",
             message_id = message_id,
             reply_in_thread = True
         )
@@ -274,7 +272,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             )
         except Exception:
             await self.reply_message_async(
-                response = "非常抱歉，题目解析出错。请稍后重试或联系志愿者", 
+                response = "非常抱歉，题目解析出错。请稍后重试或联系志愿者。", 
                 message_id = message_id,
                 reply_in_thread = True,
             )
@@ -345,19 +343,25 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         )
         context["document_block_num"] = len(blocks)
 
-        # 这里的 default 仍是硬编码的
+        # 启动默认工作流
+        for workflow_name in self._default_workflows:
+            asyncio.create_task(self._run_workflow(context, workflow_name, message_id))
+        
+        # 构建菜单和响应
+        workflow_menu, _ = self._get_workflow_menu_and_mapping()
+        response_text = (
+            f"专属话题 #{problem_no} 已创建。\n"
+            f"文档链接: {self.begin_of_hyperlink}{document_title}{self.end_of_hyperlink}\n"
+            f"已在后台启动默认工作流: {', '.join(self._default_workflows)}\n\n"
+            f"{workflow_menu}"
+        )
+
         await self.reply_message_async(
-            response = (
-                f"已为您创建专属解题话题，文档已生成：\n"
-                f"🔗 {self.begin_of_hyperlink}{document_url}{self.end_of_hyperlink}\n"
-                f"正在后台启动 [default] 工作流，请您稍候..."
-            ),
+            response = response_text,
             message_id = message_id,
             hyperlinks = [document_url],
             reply_in_thread = True,
         )
-
-        asyncio.create_task(self._run_workflow(context, "default", message_id))
 
 
     async def _handle_owner_input_in_topic(
@@ -367,27 +371,76 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
     ) -> None:
         
         assert context["owner"] == parsed_message["sender"]
-        
         message_id = parsed_message["message_id"]
+        if context["is_archived"]:
+            await self.reply_message_async(
+                response = f"题目已归档，此话题即将不再受理；您可以重新 @ 我以开启一个新的解题话题。",
+                message_id = message_id,
+                reply_in_thread = True
+            )
+            
         text = parsed_message["text"].strip()
+        if "归档" in text:
+            context["is_archived"] = True
+            await self.reply_message_async(
+                response = f"题目已归档。感谢您的使用！",
+                message_id = message_id,
+                reply_in_thread = True
+            )
+            return
         
         await self._maintain_context_history(parsed_message, context)
         
         target_workflow = None
-        if text in self._workflows:
+        workflow_menu, mapping = self._get_workflow_menu_and_mapping()
+
+        if text.isdigit():
+            index = int(text)
+            if index in mapping:
+                target_workflow = mapping[index]
+        elif text in self._workflows:
             target_workflow = text
         
         if target_workflow:
-            await self.reply_message_async(f"收到，正在后台启动 [{target_workflow}] 工作流...", message_id, reply_in_thread=True)
             asyncio.create_task(self._run_workflow(context, target_workflow, message_id))
+            async with context["lock"]:
+                running_workflows = context["running_workflows"]
+            await self.reply_message_async(
+                response = f"收到。已启动 [{target_workflow}] 工作流。\n当前有 {running_workflows} 个工作流正在运行。",
+                message_id = message_id,
+                reply_in_thread = True
+            )
         else:
-            menu_lines = ["收到您的消息。如需切换解题模式，请回复以下 Key："]
-            for key, desc in self._workflow_descriptions.items():
-                menu_lines.append(f"[{key}] {desc}")
-            menu_lines.append("您也可以继续补充题目信息或图片。")
+            status_hint = ""
+            async with context["lock"]:
+                running_workflows = context["running_workflows"]
+            if running_workflows == 0:
+                status_hint = "\n当前无运行中的工作流。若已完成解题，您可以输入“归档”终止此解题话题。"
+            else:
+                status_hint = f"\n当前有 {running_workflows} 个工作流正在运行。"
+
+            await self.reply_message_async(
+                response = f"未识别指令。请回复以下序号或名称启动解题：\n{workflow_menu}{status_hint}",
+                message_id = message_id,
+                reply_in_thread = True
+            )
+
+    
+    def _get_workflow_menu_and_mapping(self) -> Tuple[str, Dict[int, str]]:
+        """
+        生成工作流菜单文本和 ID 映射表。
+        """
+        lines = []
+        mapping = {}
+        # 保证顺序一致性
+        sorted_keys = sorted(self._workflows.keys())
+        
+        for idx, key in enumerate(sorted_keys, 1):
+            desc = self._workflow_descriptions[key] # key error if missing, fast fail
+            lines.append(f"{idx}. [{key}] {desc}")
+            mapping[idx] = key
             
-            menu = "\n".join(menu_lines)
-            await self.reply_message_async(menu, message_id, reply_in_thread=True)
+        return "\n".join(lines), mapping
 
 
     async def _send_tutorial(
@@ -396,12 +449,12 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
     )-> None:
         
         tutorial_text = (
-            "您好，很高兴为您服务！\n"
-            "关于我的简易说明：\n"
-            "1. 发起解题话题：请 @ 我并发送题目；题目可以带图片！\n"
+            "您好，这里是北大物院费米子 Bot。\n"
+            "使用说明：\n"
+            "1. 发起解题话题：请 @ 我并发送题目；题目可以带图片。\n"
             "2. 多次尝试不同工作流：话题建立后，可按提示调用 AI 工作流多次解题。\n"
             "3. 指令系统：以 '/' 开头的私聊消息会被解读为指令；输入 /help 可查看可用指令。\n"
-            "如遇任何疑问，您可以随时联系志愿者~"
+            "如遇任何疑问，您可以随时联系志愿者。"
         )
         await self.reply_message_async(tutorial_text, message_id)
 
@@ -435,12 +488,18 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         workflow_func = self._workflows[workflow_name]
         start_time = get_time_stamp()
         
+        # 1. 仅更新计数器，不操作 trials 列表 (不占位)
+        async with context["lock"]:
+            context["running_workflows"] += 1
+
         try:
+            # 2. 耗时操作，无锁运行
             workflow_result = await workflow_func(context)
             
             assert isinstance(workflow_result, dict), f"Workflow {workflow_name} must return a dict"
             assert "document_content" in workflow_result, f"Workflow {workflow_name} missing 'document_content'"
 
+            # 3. 拿锁，一气呵成：写入结果 -> 追加文档 -> 更新计数器
             async with context["lock"]:
                 trial_record = {
                     "workflow": workflow_name,
@@ -451,13 +510,16 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
                 }
                 context["trials"].append(trial_record)
                 
+                # 追加刚写入的这条 (index = -1)
                 await self._push_latest_trial_to_document(context)
+                
+                context["running_workflows"] -= 1
             
             document_title = context["document_title"]
             document_url = context["document_url"]
             
             await self.reply_message_async(
-                response = f"✅ [{workflow_name}] 工作流执行完毕，结果已追加至云文档。\n🔗 {self.begin_of_hyperlink}{document_title}{self.end_of_hyperlink}",
+                response = f"[{workflow_name}] 工作流执行完毕，结果已追加至云文档。\n文档链接: {self.begin_of_hyperlink}{document_title}{self.end_of_hyperlink}",
                 message_id = reply_message_id,
                 hyperlinks = [document_url],
                 reply_in_thread = True,
@@ -465,16 +527,20 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
 
         except Exception as error:
             print(f"[PkuPhyFermionBot] Workflow {workflow_name} failed: {error}\n{traceback.format_exc()}")
+            
+            # 失败也要拿锁记录并在最后减计数
             async with context["lock"]:
                 context["trials"].append({
-                    "workflow": workflow_name,
-                    "status": "failed",
-                    "start_time": start_time,
-                    "error": str(error),
-                })
+                "workflow": workflow_name,
+                "status": "failed",
+                "start_time": start_time,
+                "end_time": get_time_stamp(),
+                "error": str(error),
+            })
+                context["running_workflows"] -= 1
             
             await self.reply_message_async(
-                response = f"❌ [{workflow_name}] 工作流执行出错: {str(error)}\n您可以联系志愿者以排查问题。",
+                response = f"[{workflow_name}] 工作流执行出错: {str(error)}\n您可以联系志愿者以排查问题。",
                 message_id = reply_message_id,
                 reply_in_thread = True,
             )
@@ -484,11 +550,23 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         self,
         context: Dict[str, Any],
     )-> None:
+        """
+        将 Context 中最新的 Trial 追加到云文档。
+        该方法必须在 context["lock"] 保护下调用。
+        """
+        if not context["trials"]:
+            return
 
         latest_trial = context["trials"][-1]
+        
+        if latest_trial["status"] != "success":
+            return
+
         workflow_name = latest_trial["workflow"]
-        trial_no = len(context["trials"])
+        # trial_no 直接取列表长度
+        trial_no = len(context["trials"]) 
         doc_content = latest_trial["document_content"]
+        images = latest_trial.get("images", [])
 
         content_str = ""
         content_str += f"{self.begin_of_third_heading}AI 解答 {trial_no} | {workflow_name}{self.end_of_third_heading}"
@@ -500,6 +578,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         await self.append_document_blocks_async(
             document_id = context["document_id"],
             blocks = blocks,
+            images = images,
         )
 
 
@@ -558,7 +637,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         elif command == "/help":
             help_text = (
                 "名称\n"
-                "    PkuPhyFermionBot - 热爱高能物理的小费米子，接入多种工作流，支持高能物理工具调用\n\n"
+                "    PkuPhyFermionBot - 物理题目整理机器人\n\n"
                 "用户指令\n"
                 "    /me     查看个人档案 (OpenID, 权限)\n"
                 "    /you    查看机器人实例信息\n"
@@ -667,7 +746,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             info = (
                 f"题目编号:   {target_id}\n"
                 f"当前状态:   {status}\n"
-                f"最新 AI 解题 trial: {last_workflow}\n"
+                f"末次工作流: {last_workflow}\n"
                 f"文档链接:   {self.begin_of_hyperlink}{document_title}{self.end_of_hyperlink}\n"
             )
             
