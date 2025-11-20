@@ -58,6 +58,12 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             "default": self._workflow_default,
             "deep_think": self._workflow_deep_think,
         }
+
+        # Workflow 描述中心 (Key -> Description)
+        self._workflow_descriptions: Dict[str, str] = {
+            "default": "快速获取基础解答",
+            "deep_think": "启用慢思考模式，多角度分析"
+        }
     
     
     async def _get_problem_no(
@@ -141,7 +147,6 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             "problem_text": None,
             "problem_images": [],
             "answer": "暂无",
-            "AI_solution": "暂无",
             
             # Workflow 相关
             "trials": [], 
@@ -196,20 +201,16 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         problem_text = context["problem_text"]
         problem_images = context["problem_images"]
         answer = context["answer"]
-        AI_solution = context["AI_solution"]
         
         content = ""
-        content += f"{self.begin_of_third_heading}题目{self.end_of_third_heading}"
+        content += f"{self.begin_of_second_heading}题目{self.end_of_second_heading}"
         content += problem_text.strip()
         content += self.divider_placeholder
-        content += f"{self.begin_of_third_heading}参考答案{self.end_of_third_heading}"
+        content += f"{self.begin_of_second_heading}参考答案{self.end_of_second_heading}"
         content += answer.strip()
         content += self.divider_placeholder
-        content += f"{self.begin_of_third_heading}AI 解答{self.end_of_third_heading}"
-        content += AI_solution.strip()
-        content += self.divider_placeholder
-        content += f"{self.begin_of_third_heading}备注{self.end_of_third_heading}"
-        content += f"暂无；未来会在这里记录解题工具调用情况、教师评价等信息"
+        content += f"{self.begin_of_second_heading}AI 解答{self.end_of_second_heading}"
+        
         
         blocks = self.build_document_blocks(
             content = content,
@@ -235,12 +236,12 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         context: Dict[str, Any],
     )-> Dict[str, Any]:
 
-        message_id = parsed_message["message_id"]
-        chat_type = parsed_message["chat_type"]
-        is_thread_root = parsed_message["is_thread_root"]
-        text = parsed_message["text"]
-        mentioned_me = parsed_message["mentioned_me"]
-        sender = parsed_message["sender"]
+        message_id: str = parsed_message["message_id"]
+        chat_type: str = parsed_message["chat_type"]
+        is_thread_root: bool = parsed_message["is_thread_root"]
+        text: str = parsed_message["text"]
+        mentioned_me: bool = parsed_message["mentioned_me"]
+        sender: Optional[str] = parsed_message["sender"]
         
         # 1. 群聊消息路由
         if chat_type == "group":
@@ -301,9 +302,8 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         """
         发起用户专属解题话题
         """
-        # 强校验：进入此函数时，该 Topic 必须是全新的，Owner 必须为空
-        # 如果这里触发 assert error，说明上游路由逻辑出现了严重 bug
-        assert context["owner"] is None, f"Topic {context['thread_root_id']} already has owner: {context['owner']}"
+        # Fast Fail: 不变量校验
+        assert context["owner"] is None, f"Topic {context['thread_root_id']} invariant violated: owner is {context['owner']}"
 
         message_id = parsed_message["message_id"]
         
@@ -327,18 +327,23 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         # 替换占位符以清理输入
         clean_text = raw_text.replace(self.image_placeholder, "").replace(self._mention_me_text, "")
 
-        understand_result = await understand_problem_async(
-            message = clean_text,
-            problem_images = raw_images,
-            model = self._config["problem_understanding"]["model"],
-            temperature = self._config["problem_understanding"]["temperature"],
-            timeout = self._config["problem_understanding"]["timeout"],
-            trial_num = self._config["problem_understanding"]["trial_num"],
-            trial_interval = self._config["problem_understanding"]["trial_interval"],
-        )
+        try:
+            understand_result = await understand_problem_async(
+                message = clean_text,
+                problem_images = raw_images,
+                model = self._config["problem_understanding"]["model"],
+                temperature = self._config["problem_understanding"]["temperature"],
+                timeout = self._config["problem_understanding"]["timeout"],
+                trial_num = self._config["problem_understanding"]["trial_num"],
+                trial_interval = self._config["problem_understanding"]["trial_interval"],
+            )
+        except Exception:
+            # 依赖服务异常，通知用户后退出
+            await self.reply_message_async("题目解析服务暂时不可用，请稍后重试或联系管理员。", message_id, reply_in_thread=True)
+            return
 
         if not understand_result:
-            await self.reply_message_async("题目解析失败，请重试。", message_id, reply_in_thread=True)
+            await self.reply_message_async("题目解析失败，无法识别题目内容。", message_id, reply_in_thread=True)
             return
         
         problem_title = understand_result["problem_title"]
@@ -402,7 +407,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             response = (
                 f"已为您创建专属解题话题 #{problem_no}，文档已生成。\n"
                 f"🔗 {document_url}\n"
-                f"正在使用 [Default] 工作流进行解答，请稍候。"
+                f"正在使用 [default] 工作流进行解答，请稍候。"
             ),
             message_id = message_id,
             reply_in_thread = True
@@ -420,29 +425,30 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         """
         处理 Owner 在话题内的发言
         """
-        # 强校验：进入此函数时，Context 必须已有 Owner 且与 Sender 一致（在 process_message 中已判断，此处再次确保）
-        assert context["owner"] == parsed_message["sender"]
+        assert context["owner"] == parsed_message["sender"], "Invariant violated: sender must be owner"
         
         message_id = parsed_message["message_id"]
         text = parsed_message["text"].strip()
         
         await self._maintain_context_history(parsed_message, context)
         
-        if text == "深度思考":
-            await self.reply_message_async("收到，正在切换至 [Deep Think] 工作流。", message_id, reply_in_thread=True)
-            await self._run_workflow(context, "deep_think")
-        elif text == "默认解题":
-            await self.reply_message_async("收到，正在切换至 [Default] 工作流。", message_id, reply_in_thread=True)
-            await self._run_workflow(context, "default")
+        # 动态匹配 Workflow Key
+        # 优先全匹配 Key
+        target_workflow = None
+        if text in self._workflows:
+            target_workflow = text
+        
+        if target_workflow:
+            await self.reply_message_async(f"收到，正在切换至 [{target_workflow}] 工作流。", message_id, reply_in_thread=True)
+            await self._run_workflow(context, target_workflow)
         else:
-            # 默认回复：展示菜单 (Plain text style)
-            menu = (
-                "收到您的消息。\n"
-                "如需切换解题模式，请回复以下关键词：\n"
-                "[默认解题] 快速获取基础解答\n"
-                "[深度思考] 启用慢思考模式，多角度分析\n"
-                "您也可以继续补充题目信息或图片。"
-            )
+            # 动态生成菜单
+            menu_lines = ["收到您的消息。如需切换解题模式，请回复以下 Key："]
+            for key, desc in self._workflow_descriptions.items():
+                menu_lines.append(f"[{key}] {desc}")
+            menu_lines.append("您也可以继续补充题目信息或图片。")
+            
+            menu = "\n".join(menu_lines)
             await self.reply_message_async(menu, message_id, reply_in_thread=True)
 
 
@@ -471,7 +477,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         text = parsed_message["text"]
         sender = parsed_message["sender"]
         
-        # 直接获取，不兜底
+        # Fast Fail check
         is_admin = sender in self._config["admin_open_ids"]
 
         await self._execute_command(
@@ -494,7 +500,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         """
         执行一次 Trial
         """
-        # 直接获取，如果 key 不存在，直接 KeyError Fast Fail，不写 "if not func return"
+        # Fast Fail: 直接索引，不存在则 KeyError 抛出，暴露配置错误
         workflow_func = self._workflows[workflow_name]
         
         # 记录开始
@@ -512,7 +518,6 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         except Exception as e:
             trial_record["status"] = "failed"
             trial_record["error"] = str(e)
-            # Worker 线程内的异常最好打印出来，防止静默失败
             print(f"[PkuPhyFermionBot] Workflow {workflow_name} failed: {e}")
 
 
@@ -577,7 +582,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
                 f"BOT_INFO\n"
                 f"--------\n"
                 f"id:      {self._config['open_id']}\n"
-                f"version: PkuPhyFermionBot v0.2.5\n"
+                f"version: PkuPhyFermionBot v0.2.6\n"
                 f"unit:    PKU Physics\n"
                 f"kernel:  linux_compat_mode\n"
                 f"```"
@@ -699,11 +704,8 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             )
             
             if verbose:
-                # Deep dump for debugging
                 import json
-                # 过滤掉 heavy 的 history，只看状态
                 debug_view = {k: v for k, v in ctx.items() if k != "history"}
-                # 也可以简略显示 history 长度
                 debug_view["history_len"] = len(ctx["history"].get("prompt", []))
                 
                 json_str = json.dumps(debug_view, indent=2, default=str, ensure_ascii=False)
