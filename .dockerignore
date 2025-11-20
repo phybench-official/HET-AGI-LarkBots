@@ -1,0 +1,39 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+.venv
+venv/
+
+# 配置文件（通过 Volume 挂载）
+.env*
+*.json
+!pyproject.toml
+configs/
+
+# 日志和数据
+logs/
+*.log
+*.db
+
+# 文档
+documents/
+pictures/
+*.md
+
+# 测试
+test_case/
+test*.py
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore

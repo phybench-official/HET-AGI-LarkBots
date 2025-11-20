@@ -1,0 +1,26 @@
+services:
+  lark-bot:
+    image: wjsoj/het-lark-bot:latest
+    container_name: het-lark-bot
+
+    env_file: .env
+
+    volumes:
+      - ./configs:/app/configs:rw
+      - ./api_keys.json:/app/api_keys.json:ro
+      - ./lark_api_keys.json:/app/lark_api_keys.json:ro
+      - ./mcp_servers_config.json:/app/mcp_servers_config.json:ro
+
+    restart: unless-stopped
+
+    deploy:
+      resources:
+        limits:
+          cpus: '32.0'
+          memory: 32G
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
