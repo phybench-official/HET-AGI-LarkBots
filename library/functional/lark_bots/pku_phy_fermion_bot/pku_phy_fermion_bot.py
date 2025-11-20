@@ -54,7 +54,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         self._problem_id_to_context: Dict[int, Dict[str, Any]] = {}
 
         # Workflow 注册中心
-        self._workflows: Dict[str, Callable[[Dict[str, Any]], Coroutine[Any, Any, None]]] = {
+        self._workflows: Dict[str, Callable[[Dict[str, Any]], Coroutine[Any, Any, Dict[str, Any]]]] = {
             "default": self._workflow_default,
             "deep_think": self._workflow_deep_think,
         }
@@ -150,6 +150,8 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             
             # Workflow 相关
             "trials": [], 
+            # 话题级锁，保护 trials 列表和文档追加操作的原子性
+            "lock": asyncio.Lock(), 
             
             # 文档相关
             "document_created": False,
@@ -185,46 +187,6 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         context["history"]["images"].extend(images)
         context["history"]["roles"].append("user")
     
-    
-    async def _sync_document_content_with_context(
-        self,
-        context: Dict[str, Any],
-    )-> None:
-        """
-        将内存中 context 的文档内容推至飞书云文档
-        要求 document_id、problem_text、problem_images 和 answer 已设置
-        会自动维护 context["document_block_num"]
-        """
-        
-        document_id = context["document_id"]
-        document_block_num = context["document_block_num"]
-        problem_text = context["problem_text"]
-        problem_images = context["problem_images"]
-        answer = context["answer"]
-        
-        content = ""
-        content += f"{self.begin_of_second_heading}题目{self.end_of_second_heading}"
-        content += problem_text.strip()
-        content += self.divider_placeholder
-        content += f"{self.begin_of_second_heading}参考答案{self.end_of_second_heading}"
-        content += answer.strip()
-        content += self.divider_placeholder
-        content += f"{self.begin_of_second_heading}AI 解答{self.end_of_second_heading}"
-        
-        
-        blocks = self.build_document_blocks(
-            content = content,
-        )
-        await self.overwrite_document_async(
-            document_id = document_id,
-            blocks = blocks,
-            images = problem_images,
-            existing_block_num = document_block_num,
-        )
-        context["document_block_num"] = len(blocks)
-        
-        return None
-
     
     # -------------------------------------------------------------------------
     # 业务逻辑核心路由
@@ -302,7 +264,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         """
         发起用户专属解题话题
         """
-        # Fast Fail: 不变量校验
+        # Fast Fail
         assert context["owner"] is None, f"Topic {context['thread_root_id']} invariant violated: owner is {context['owner']}"
 
         message_id = parsed_message["message_id"]
@@ -310,7 +272,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         context["owner"] = sender
         context["is_accepted"] = True
         
-        # 记录第一条消息作为题目描述
+        # 记录第一条消息
         await self._maintain_context_history(parsed_message, context)
         
         # 临时回复
@@ -323,8 +285,6 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         # 1. 理解题目
         raw_text = context["history"]["prompt"][0]
         raw_images = context["history"]["images"]
-        
-        # 替换占位符以清理输入
         clean_text = raw_text.replace(self.image_placeholder, "").replace(self._mention_me_text, "")
 
         try:
@@ -338,7 +298,6 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
                 trial_interval = self._config["problem_understanding"]["trial_interval"],
             )
         except Exception:
-            # 依赖服务异常，通知用户后退出
             await self.reply_message_async("题目解析服务暂时不可用，请稍后重试或联系管理员。", message_id, reply_in_thread=True)
             return
 
@@ -370,7 +329,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         
         problem_text, answer = await asyncio.gather(problem_text_task, answer_task)
 
-        # 为图片预留位置：LarkBot 要求 placeholder 数量与 images 列表一致
+        # 为图片预留位置
         problem_text = problem_text + len(raw_images) * self.image_placeholder
 
         # 3. 获取编号并创建文档
@@ -399,22 +358,37 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         
         self._problem_id_to_context[problem_no] = context
 
-        # 5. 同步文档内容
-        await self._sync_document_content_with_context(context)
+        # 5. 初始化文档内容 (Inline)
+        content = ""
+        content += f"{self.begin_of_second_heading}题目{self.end_of_second_heading}"
+        content += problem_text.strip()
+        content += self.divider_placeholder
+        content += f"{self.begin_of_second_heading}参考答案{self.end_of_second_heading}"
+        content += answer.strip()
+        content += self.divider_placeholder
+        
+        blocks = self.build_document_blocks(content)
+        await self.overwrite_document_async(
+            document_id = document_id,
+            blocks = blocks,
+            images = raw_images,
+            existing_block_num = 0,
+        )
+        context["document_block_num"] = len(blocks)
 
         # 6. 正式回复用户
         await self.reply_message_async(
             response = (
                 f"已为您创建专属解题话题 #{problem_no}，文档已生成。\n"
                 f"🔗 {document_url}\n"
-                f"正在使用 [default] 工作流进行解答，请稍候。"
+                f"正在后台启动 [default] 工作流，请您稍候..."
             ),
             message_id = message_id,
             reply_in_thread = True
         )
 
-        # 7. 启动默认 Workflow
-        await self._run_workflow(context, "default")
+        # 7. 启动默认 Workflow (后台)
+        asyncio.create_task(self._run_workflow(context, "default", message_id))
 
 
     async def _handle_owner_input_in_topic(
@@ -432,17 +406,14 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         
         await self._maintain_context_history(parsed_message, context)
         
-        # 动态匹配 Workflow Key
-        # 优先全匹配 Key
         target_workflow = None
         if text in self._workflows:
             target_workflow = text
         
         if target_workflow:
-            await self.reply_message_async(f"收到，正在切换至 [{target_workflow}] 工作流。", message_id, reply_in_thread=True)
-            await self._run_workflow(context, target_workflow)
+            await self.reply_message_async(f"收到，正在后台启动 [{target_workflow}] 工作流...", message_id, reply_in_thread=True)
+            asyncio.create_task(self._run_workflow(context, target_workflow, message_id))
         else:
-            # 动态生成菜单
             menu_lines = ["收到您的消息。如需切换解题模式，请回复以下 Key："]
             for key, desc in self._workflow_descriptions.items():
                 menu_lines.append(f"[{key}] {desc}")
@@ -453,9 +424,6 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
 
 
     async def _send_tutorial(self, message_id: str) -> None:
-        """
-        发送教程
-        """
         tutorial_text = (
             "简易使用说明：\n"
             "1. 发起解题：请在群聊新建消息并 @我，或直接私聊发送题目。\n"
@@ -470,14 +438,10 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         parsed_message: Dict[str, Any],
         context: Dict[str, Any],
     ) -> None:
-        """
-        处理指令
-        """
         message_id = parsed_message["message_id"]
         text = parsed_message["text"]
         sender = parsed_message["sender"]
         
-        # Fast Fail check
         is_admin = sender in self._config["admin_open_ids"]
 
         await self._execute_command(
@@ -489,36 +453,98 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
 
 
     # -------------------------------------------------------------------------
-    # Workflow & Trial Management
+    # Workflow & Trial Management (Background Async)
     # -------------------------------------------------------------------------
 
     async def _run_workflow(
         self,
         context: Dict[str, Any],
         workflow_name: str,
+        reply_message_id: str,
     ) -> None:
         """
-        执行一次 Trial
+        执行一次 Trial 的 Wrapper（运行在后台 Task 中）。
         """
-        # Fast Fail: 直接索引，不存在则 KeyError 抛出，暴露配置错误
         workflow_func = self._workflows[workflow_name]
-        
-        # 记录开始
-        trial_record = {
-            "workflow": workflow_name,
-            "status": "running",
-            "start_time": get_time_stamp(),
-            "result": None
-        }
-        context["trials"].append(trial_record)
+        start_time = get_time_stamp()
         
         try:
-            await workflow_func(context)
-            trial_record["status"] = "success"
+            result_data = await workflow_func(context)
+            
+            assert isinstance(result_data, dict), f"Workflow {workflow_name} must return a dict"
+            assert "document_content" in result_data, f"Workflow {workflow_name} missing 'document_content'"
+
+            # 临界区：原子更新
+            async with context["lock"]:
+                trial_record = {
+                    "workflow": workflow_name,
+                    "status": "success",
+                    "start_time": start_time,
+                    "end_time": get_time_stamp(),
+                    "result": result_data,
+                    "document_content": result_data["document_content"],
+                    "result_images": result_data.get("images", [])
+                }
+                context["trials"].append(trial_record)
+                
+                await self._push_latest_trial_to_document(context)
+            
+            doc_url = context.get("document_url", "")
+            await self.reply_message_async(
+                response = f"✅ [{workflow_name}] 工作流执行完毕，结果已追加至云文档。\n🔗 {doc_url}",
+                message_id = reply_message_id,
+                reply_in_thread = True
+            )
+
         except Exception as e:
-            trial_record["status"] = "failed"
-            trial_record["error"] = str(e)
-            print(f"[PkuPhyFermionBot] Workflow {workflow_name} failed: {e}")
+            print(f"[PkuPhyFermionBot] Workflow {workflow_name} failed: {e}\n{traceback.format_exc()}")
+            async with context["lock"]:
+                context["trials"].append({
+                    "workflow": workflow_name,
+                    "status": "failed",
+                    "start_time": start_time,
+                    "error": str(e)
+                })
+            
+            await self.reply_message_async(
+                response = f"❌ [{workflow_name}] 工作流执行出错: {str(e)}",
+                message_id = reply_message_id,
+                reply_in_thread = True
+            )
+
+
+    async def _push_latest_trial_to_document(
+        self,
+        context: Dict[str, Any],
+    ) -> None:
+        """
+        将 Context 中最新的 Trial 追加到云文档。
+        该方法必须在 context["lock"] 保护下调用。
+        """
+        if not context["trials"]:
+            return
+            
+        latest_trial = context["trials"][-1]
+        if latest_trial["status"] != "success":
+            return
+
+        workflow_name = latest_trial["workflow"]
+        trial_no = len(context["trials"])
+        doc_content = latest_trial["document_content"]
+        images = latest_trial.get("result_images", [])
+
+        content_str = ""
+        content_str += f"{self.begin_of_third_heading}AI 解答 {trial_no} | {workflow_name}{self.end_of_third_heading}"
+        content_str += doc_content.strip()
+        content_str += self.divider_placeholder
+        
+        blocks = self.build_document_blocks(content_str)
+        
+        await self.append_document_blocks_async(
+            document_id = context["document_id"],
+            blocks = blocks,
+            images = images
+        )
 
 
     # -------------------------------------------------------------------------
@@ -528,23 +554,26 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
     async def _workflow_default(
         self,
         context: Dict[str, Any],
-    ) -> None:
-        # TODO: 实现具体的 LLM 调用、Equation Rendering、文档更新逻辑
-        # 开发者可以直接从 context["problem_text"] 和 context["problem_images"] 获取输入
-        # 完成解答后，更新 context["AI_solution"] 并调用 self._sync_document_content_with_context(context)
-        raise NotImplementedError("Default workflow logic to be implemented.")
-
+    ) -> Dict[str, Any]:
+        await asyncio.sleep(2)
+        return {
+            "document_content": "这是默认工作流生成的测试内容 (Mock)。",
+            "images": []
+        }
 
     async def _workflow_deep_think(
         self,
         context: Dict[str, Any],
-    ) -> None:
-        # TODO: 实现 Chain-of-Thought 或其他高级逻辑
-        raise NotImplementedError("Deep think workflow logic to be implemented.")
+    ) -> Dict[str, Any]:
+        await asyncio.sleep(5)
+        return {
+            "document_content": "这是深度思考工作流生成的详细解析 (Mock)。\n包含公式：$E=mc^2$",
+            "images": []
+        }
 
 
     # -------------------------------------------------------------------------
-    # Command Executor (Linux Console Style)
+    # Command Executor (Chinese Linux Console Style)
     # -------------------------------------------------------------------------
 
     async def _execute_command(
@@ -560,17 +589,16 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         command = args[0].lower()
         
         # ---------------------------------------------------------
-        # User Commands
+        # User Commands (Translated to Chinese)
         # ---------------------------------------------------------
 
         if command == "/me":
-            role = "admin" if is_admin else "user"
+            role = "管理员 (Admin)" if is_admin else "普通用户 (User)"
             response_text = (
                 f"```text\n"
-                f"USER_PROFILE\n"
-                f"------------\n"
-                f"open_id: {sender_id}\n"
-                f"role:    {role}\n"
+                f"[用户档案]\n"
+                f"OpenID:   {sender_id}\n"
+                f"权限身份: {role}\n"
                 f"```"
             )
             await self.reply_message_async(response_text, message_id)
@@ -579,12 +607,11 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         elif command == "/you":
             response_text = (
                 f"```text\n"
-                f"BOT_INFO\n"
-                f"--------\n"
-                f"id:      {self._config['open_id']}\n"
-                f"version: PkuPhyFermionBot v0.2.6\n"
-                f"unit:    PKU Physics\n"
-                f"kernel:  linux_compat_mode\n"
+                f"[系统信息]\n"
+                f"机器人ID: {self._config['open_id']}\n"
+                f"版本号:   PkuPhyFermionBot v0.3.1\n"
+                f"所属单位: 北大物理学院\n"
+                f"运行模式: Linux 兼容模式\n"
                 f"```"
             )
             await self.reply_message_async(response_text, message_id)
@@ -593,71 +620,71 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         elif command == "/help":
             help_text = (
                 "```text\n"
-                "NAME\n"
-                "    PkuPhyFermionBot - The physics problem organizer\n\n"
-                "USER COMMANDS\n"
-                "    /me     Show user profile (OpenID, Role)\n"
-                "    /you    Show bot instance info\n\n"
+                "名称\n"
+                "    PkuPhyFermionBot - 物理题目整理机器人\n\n"
+                "用户指令\n"
+                "    /me     查看个人档案 (OpenID, 权限)\n"
+                "    /you    查看机器人实例信息\n"
+                "    /help   显示本帮助信息\n\n"
             )
             if is_admin:
                 help_text += (
-                    "ADMIN COMMANDS\n"
+                    "管理员指令\n"
                     "    /stats\n"
-                    "        Show real-time problem collection statistics.\n\n"
-                    "    /glance <start_id> <end_id>\n"
-                    "        Quick overview of a range of problems.\n\n"
-                    "    /view <id|-1|random> [--verbose]\n"
-                    "        Inspect problem context. -1 for latest.\n\n"
-                    "    /update_config [path]\n"
-                    "        Hot-reload configuration. Default path used if omitted.\n"
+                    "        显示题库实时统计信息\n\n"
+                    "    /glance <起始ID> <结束ID>\n"
+                    "        批量概览题目状态\n\n"
+                    "    /view <ID|-1|random> [--verbose]\n"
+                    "        查看题目详情上下文 (-1 为最新，random 为随机)\n\n"
+                    "    /update_config [路径]\n"
+                    "        热重载配置文件 (默认使用启动路径)\n"
                 )
             help_text += "```"
             await self.reply_message_async(help_text, message_id)
             return
 
         # ---------------------------------------------------------
-        # Admin Commands (Fast Fail on permission)
+        # Admin Commands (Fast Fail)
         # ---------------------------------------------------------
 
         if not is_admin:
-            await self.reply_message_async("```text\nEACCES: Permission denied\n```", message_id)
+            await self.reply_message_async("```text\n错误: 权限不足 (EACCES)\n```", message_id)
             return
 
         if command == "/stats":
             current_total = self._next_problem_no - 1
-            # 假设这里可以快速获取内存占用或其他 runtime 信息
-            await self.reply_message_async(f"```text\nTOTAL_PROBLEMS: {current_total}\n```", message_id)
+            await self.reply_message_async(f"```text\n当前题库总数: {current_total}\n```", message_id)
             return
 
         elif command == "/glance":
             if len(args) < 3:
-                await self.reply_message_async("```text\nUsage: /glance <start> <end>\n```", message_id)
+                await self.reply_message_async("```text\n用法: /glance <起始ID> <结束ID>\n```", message_id)
                 return
             
             try:
                 start_id = int(args[1])
                 end_id = int(args[2])
             except ValueError:
-                await self.reply_message_async("```text\nERR: IDs must be integers.\n```", message_id)
+                await self.reply_message_async("```text\n错误: ID 必须为整数\n```", message_id)
                 return
             
             if end_id < start_id:
-                await self.reply_message_async("```text\nERR: End ID must be >= Start ID.\n```", message_id)
+                await self.reply_message_async("```text\n错误: 结束ID 不能小于 起始ID\n```", message_id)
                 return
                 
             if end_id - start_id > 50:
-                await self.reply_message_async("```text\nERR: Range too large (max 50).\n```", message_id)
+                await self.reply_message_async("```text\n错误: 范围过大 (最大 50)\n```", message_id)
                 return
 
-            lines = [f"GLANCE ({start_id} -> {end_id})"]
+            lines = [f"题库概览 ({start_id} -> {end_id})"]
             for pid in range(start_id, end_id + 1):
                 ctx = self._problem_id_to_context.get(pid)
                 if ctx:
-                    title = ctx.get("document_title", "Untitled").split("|")[-1].strip()
-                    status = "[ARC]" if ctx.get("is_archived") else "[ACT]"
+                    title = ctx.get("document_title", "无标题").split("|")[-1].strip()
+                    status = "[归档]" if ctx.get("is_archived") else "[活跃]"
                     lines.append(f"#{pid:<4} {status} {title[:20]}")
                 else:
-                    lines.append(f"#{pid:<4} [N/A]")
+                    lines.append(f"#{pid:<4} [无数据]")
             
             report = "\n".join(lines)
             await self.reply_message_async(f"```text\n{report}\n```", message_id)
@@ -665,7 +692,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
 
         elif command == "/view":
             if len(args) < 2:
-                await self.reply_message_async("```text\nUsage: /view <id|-1|random> [--verbose]\n```", message_id)
+                await self.reply_message_async("```text\n用法: /view <ID|-1|random> [--verbose]\n```", message_id)
                 return
             
             target_str = args[1]
@@ -677,39 +704,43 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
                     target_id = current_max
                 elif target_str == "random":
                     if current_max < 1:
-                        await self.reply_message_async("```text\nERR: Database empty.\n```", message_id)
+                        await self.reply_message_async("```text\n错误: 题库为空\n```", message_id)
                         return
                     target_id = random.randint(1, current_max)
                 else:
                     target_id = int(target_str)
             except ValueError:
-                await self.reply_message_async("```text\nERR: Invalid ID format.\n```", message_id)
+                await self.reply_message_async("```text\n错误: ID 格式无效\n```", message_id)
                 return
 
             ctx = self._problem_id_to_context.get(target_id)
             if not ctx:
-                await self.reply_message_async(f"```text\nERR: Problem #{target_id} not found in memory.\n```", message_id)
+                await self.reply_message_async(f"```text\n错误: 内存中未找到题目 #{target_id}\n```", message_id)
                 return
             
             # Info View
             doc_url = ctx.get("document_url", "N/A")
-            status = "Archived" if ctx.get("is_archived") else "Active"
-            workflow = ctx["trials"][-1]["workflow"] if ctx["trials"] else "None"
+            status = "已归档" if ctx.get("is_archived") else "进行中"
+            last_workflow = "无"
+            if ctx["trials"]:
+                 last_workflow = ctx["trials"][-1]["workflow"]
             
             info = (
-                f"PROBLEM_ID:   {target_id}\n"
-                f"STATUS:       {status}\n"
-                f"LAST_WORKFLOW:{workflow}\n"
-                f"DOC_URL:      {doc_url}\n"
+                f"题目编号:   {target_id}\n"
+                f"当前状态:   {status}\n"
+                f"末次工作流: {last_workflow}\n"
+                f"文档链接:   {doc_url}\n"
             )
             
             if verbose:
                 import json
-                debug_view = {k: v for k, v in ctx.items() if k != "history"}
+                # 过滤 heavy 对象
+                debug_view = {k: v for k, v in ctx.items() if k not in ["history", "lock"]}
                 debug_view["history_len"] = len(ctx["history"].get("prompt", []))
+                debug_view["trials_count"] = len(ctx["trials"])
                 
                 json_str = json.dumps(debug_view, indent=2, default=str, ensure_ascii=False)
-                info += f"\nCONTEXT_DUMP:\n{json_str}"
+                info += f"\n上下文转储 (Dump):\n{json_str}"
 
             await self.reply_message_async(f"```text\n{info}\n```", message_id)
             return
@@ -717,15 +748,15 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         elif command == "/update_config":
             target_path = args[1] if len(args) > 1 else self._config_path
             
-            await self.reply_message_async(f"Loading config from {target_path}...", message_id)
+            await self.reply_message_async(f"正在重载配置 ({target_path})...", message_id)
             try:
                 result_content = await self._reload_config_async(target_path)
                 preview = result_content[:80].replace("\n", "\\n")
-                await self.reply_message_async(f"```text\nOK. Config reloaded.\nPreview: {preview}...\n```", message_id)
+                await self.reply_message_async(f"```text\n成功 (OK)\n摘要: {preview}...\n```", message_id)
             except Exception as e:
-                await self.reply_message_async(f"```text\nERR: Reload failed.\n{str(e)}\n```", message_id)
+                await self.reply_message_async(f"```text\n错误: 重载失败\n{str(e)}\n```", message_id)
             return
 
         else:
-            await self.reply_message_async(f"```text\nERR: Unknown command '{command}'\n```", message_id)
+            await self.reply_message_async(f"```text\n错误: 未知指令 '{command}'\n```", message_id)
             return

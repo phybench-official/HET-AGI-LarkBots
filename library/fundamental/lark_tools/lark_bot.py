@@ -60,6 +60,7 @@ class LarkBot:
     
     create_document_backoff_seconds = [1.0] * 32 + [2.0] * 32 + [4.0] * 32 + [8.0] * 32
     overwrite_document_backoff_seconds = [1.0] * 32 + [2.0] * 32 + [4.0] * 32 + [8.0] * 32
+    append_document_blocks_backoff_seconds = [1.0] * 32 + [2.0] * 32 + [4.0] * 32 + [8.0] * 32
     delete_file_backoff_seconds = [1.0] * 32 + [2.0] * 32 + [4.0] * 32 + [8.0] * 32
     
     _spawned_processes: List[multiprocessing.Process] = []
@@ -1202,6 +1203,95 @@ class LarkBot:
         request_builder = request_builder.file_token(file_token)
         request = request_builder.build()
         return request
+    
+    
+    @backoff_async(append_document_blocks_backoff_seconds)
+    async def append_document_blocks_async(
+        self,
+        document_id: str,
+        blocks: List[Block],
+        images: List[bytes] = [],
+    )-> None:
+        
+        if not blocks: return
+
+        document_root_block_id = document_id
+        assert self._lark_client.docx
+
+        insert_body_builder = CreateDocumentBlockChildrenRequestBody.builder()
+        insert_body_builder = insert_body_builder.children(blocks)
+        insert_body_builder = insert_body_builder.index(-1)
+        insert_request_body = insert_body_builder.build()
+        
+        insert_request_builder = CreateDocumentBlockChildrenRequest.builder()
+        insert_request_builder = insert_request_builder.document_id(document_id)
+        insert_request_builder = insert_request_builder.block_id(document_root_block_id)
+        insert_request_builder = insert_request_builder.request_body(insert_request_body)
+        insert_request = insert_request_builder.build()
+        
+        insert_response = await self._lark_client.docx.v1.document_block_children.acreate(insert_request)
+        
+        if not insert_response.success():
+            raise RuntimeError(f"Failed to append blocks: {insert_response.code} {insert_response.msg}")
+        
+        assert insert_response.data
+        assert insert_response.data.children
+        created_blocks: List[Block] = insert_response.data.children
+
+        image_block_ids: List[str] = []
+        for block in created_blocks:
+            if block.block_type == self.image_block_type:
+                assert block.block_id is not None
+                image_block_ids.append(block.block_id)
+        if not images and not image_block_ids: return
+
+        if len(image_block_ids) != len(images):
+            print(f"[LarkBot] Warning: Appended {len(image_block_ids)} image blocks but provided {len(images)} images.")
+        
+        upload_tasks: List[Coroutine[Any, Any, str]] = []
+        paired_uploads = zip(image_block_ids, images) 
+        for block_id, image_bytes in paired_uploads:
+            task = self.upload_image_for_document_async(
+                image = image_bytes,
+                document_id = document_id,
+                block_id = block_id,
+            )
+            upload_tasks.append(task)
+        if not upload_tasks: return
+
+        image_tokens: List[str] = await asyncio.gather(*upload_tasks)
+
+        update_requests: List[UpdateBlockRequest] = []
+        valid_block_ids_to_update = image_block_ids[:len(image_tokens)]
+        
+        for block_id, image_token in zip(valid_block_ids_to_update, image_tokens):
+            replace_image_req_builder = ReplaceImageRequest.builder()
+            replace_image_req_builder = replace_image_req_builder.token(image_token)
+            replace_image_req = replace_image_req_builder.build()
+            
+            update_req_builder = UpdateBlockRequest.builder()
+            update_req_builder = update_req_builder.block_id(block_id)
+            update_req_builder = update_req_builder.replace_image(replace_image_req)
+            update_req = update_req_builder.build()
+            
+            update_requests.append(update_req)
+
+        if update_requests:
+            request_body_builder = BatchUpdateDocumentBlockRequestBody.builder()
+            request_body_builder = request_body_builder.requests(update_requests)
+            request_body = request_body_builder.build()
+            
+            batch_update_request_builder = BatchUpdateDocumentBlockRequest.builder()
+            batch_update_request_builder = batch_update_request_builder.document_id(document_id)
+            batch_update_request_builder = batch_update_request_builder.request_body(request_body)
+            batch_update_request = batch_update_request_builder.build()
+            
+            update_response = await self._lark_client.docx.v1.document_block.abatch_update(batch_update_request)
+            
+            if not update_response.success():
+                raise RuntimeError(f"[LarkBot] Failed to batch update appended image blocks: {update_response.code} {update_response.msg}")
+
+        return None
     
     
     @backoff(delete_file_backoff_seconds)
