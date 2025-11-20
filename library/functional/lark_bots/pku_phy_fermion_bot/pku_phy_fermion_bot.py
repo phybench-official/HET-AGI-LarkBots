@@ -55,8 +55,8 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         self._problem_id_to_context: Dict[int, Dict[str, Any]] = {}
 
         self._workflows: Dict[str, Callable[[Dict[str, Any]], Coroutine[Any, Any, Dict[str, Any]]]] = {
-            "Gemini-2.5-Pro": with_tools_func_factory("Gemini-2.5-Pro", self),
-            "GPT-5-Pro": with_tools_func_factory("GPT-5-Pro", self),
+            "Gemini-2.5-Pro with tools": with_tools_func_factory("Gemini-2.5-Pro", self),
+            "GPT-5-Pro with tools": with_tools_func_factory("GPT-5-Pro", self),
             "Gemini-2.5-Pro": straight_forwarding_func_factory("Gemini-2.5-Pro", self),
             "GPT-5-Pro": straight_forwarding_func_factory("GPT-5-Pro", self),
         }
@@ -362,7 +362,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         response_text = (
             f"您的题目已整理进文档 {self.begin_of_hyperlink}{document_title}{self.end_of_hyperlink}\n"
             f"已在后台启动默认工作流: {', '.join(self._default_workflows)}\n\n"
-            f"您可以稍作等待，也可以调用其他工作流："
+            f"您可以稍作等待，也可以调用其他工作流：\n"
             f"{workflow_menu}"
         )
 
@@ -436,13 +436,12 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             )
 
     
-    def _get_workflow_menu_and_mapping(self) -> Tuple[str, Dict[int, str]]:
-        """
-        生成工作流菜单文本和 ID 映射表。
-        """
+    def _get_workflow_menu_and_mapping(
+        self,
+    )-> Tuple[str, Dict[int, str]]:
+
         lines = []
         mapping = {}
-        # 保证顺序一致性
         sorted_keys = sorted(self._workflows.keys())
         
         for idx, key in enumerate(sorted_keys, 1):
