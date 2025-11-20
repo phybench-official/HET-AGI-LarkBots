@@ -1,9 +1,8 @@
 from ....fundamental import *
 from .equation_rendering import *
-from .problem_understanding_former import *
-from .problem_confirming_former import *
-from .problem_solving_former import *
+from .problem_understanding import *
 
+# 注意：已移除所有 _former 模块引用，业务逻辑完全重构
 
 __all__ = [
     "PkuPhyFermionBot",
@@ -27,11 +26,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             max_workers = max_workers,
         )
         
-        # start 动作的逻辑是会在子进程中再跑一个机器人
-        # 这样可以暴露简洁的 API，把不同机器人隔离在不同进程中，防止底层库报错
-        # 这背后依赖属性 _init_arguments
-        # 所以子类如果签名改变，有义务自行维护 _init_arguments
-        # 另外，由于会被运行两次，所以 __init__ 方法应是轻量级且幂等的
+        # 维护多进程启动所需的参数
         self._init_arguments: Dict[str, Any] = {
             "config_path": config_path,
             "worker_timeout": worker_timeout,
@@ -43,6 +38,8 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         self._acceptance_cache: OrderedDict[str, bool] = OrderedDict()
         
         self._mention_me_text = f"@{self._config['name']}"
+        
+        # 复用 equation rendering 逻辑，作为工具函数保留
         self._render_equation_async = lambda text, **inference_arguments: render_equation_async(
             text = text,
             begin_of_equation = self.begin_of_equation,
@@ -52,7 +49,15 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         
         self._next_problem_no = 1
         self._next_problem_no_lock = asyncio.Lock()
+        
+        # 用于管理员查看的 Context 镜像
         self._problem_id_to_context: Dict[int, Dict[str, Any]] = {}
+
+        # Workflow 注册中心
+        self._workflows: Dict[str, Callable[[Dict[str, Any]], Coroutine[Any, Any, None]]] = {
+            "default": self._workflow_default,
+            "deep_think": self._workflow_deep_think,
+        }
     
     
     async def _get_problem_no(
@@ -64,47 +69,54 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             return self._next_problem_no - 1
 
     
+    def _mark_thread_as_accepted(
+        self,
+        thread_root_id: str,
+    )-> None:
+        
+        self._acceptance_cache[thread_root_id] = True
+        self._acceptance_cache.move_to_end(thread_root_id)
+        
+        if len(self._acceptance_cache) > self._acceptance_cache_size:
+            evicted_key, _ = self._acceptance_cache.popitem(last=False)
+            print(f"[PkuPhyFermionBot] Evicted {evicted_key} from acceptance cache.")
+
+
     def should_process(
         self,
         parsed_message: Dict[str, Any],
     )-> bool:
         
+        chat_type = parsed_message["chat_type"]
+        is_thread_root = parsed_message["is_thread_root"]
+        mentioned_me = parsed_message["mentioned_me"]
+        thread_root_id = parsed_message["thread_root_id"]
+        message_id = parsed_message["message_id"]
+
         # 群聊消息
-        if parsed_message["chat_type"] == "group":
+        if chat_type == "group":
             # 是顶层消息
-            if parsed_message["is_thread_root"]:
-                # @了机器人，需要处理
-                if parsed_message["mentioned_me"]:
-                    thread_root_id: Optional[str] = parsed_message["thread_root_id"]
+            if is_thread_root:
+                # @了机器人 -> 处理并标记接受
+                if mentioned_me:
                     assert thread_root_id
-                    print(f"[PkuPhyFermionBot] Root message {parsed_message['message_id']} accepted, adding to acceptance cache.")
-                    self._acceptance_cache[thread_root_id] = True
-                    self._acceptance_cache.move_to_end(thread_root_id)
-                    if len(self._acceptance_cache) > self._acceptance_cache_size:
-                        evicted_key, _ = self._acceptance_cache.popitem(last=False)
-                        print(f"[PkuPhyFermionBot] Evicted {evicted_key} from acceptance cache.")
+                    print(f"[PkuPhyFermionBot] Group Root message {message_id} accepted.")
+                    self._mark_thread_as_accepted(thread_root_id)
                     return True
-                # 没有@机器人，直接忽略
+                # 没有@机器人 -> 忽略
                 else:
-                    print(f"[PkuPhyFermionBot] Dropping root message {parsed_message['message_id']} (not mentioned).")
                     return False
-            # 是话题内消息，不知道对应的顶层消息怎样，需要处理
+            # 是话题内部消息 -> 交给 worker 判断是否是已接受的话题
             else:
                 return True
-        # 私聊消息，执行指令/返回教程
+        
+        # 私聊消息
         else:
-            # 是顶层消息
-            if parsed_message["is_thread_root"]:
-                # @了机器人，需要处理
-                if parsed_message["mentioned_me"]:
-                    thread_root_id: Optional[str] = parsed_message["thread_root_id"]
-                    assert thread_root_id
-                    print(f"[PkuPhyFermionBot] Root message {parsed_message['message_id']} accepted, adding to acceptance cache.")
-                    self._acceptance_cache[thread_root_id] = True
-                    self._acceptance_cache.move_to_end(thread_root_id)
-                    if len(self._acceptance_cache) > self._acceptance_cache_size:
-                        evicted_key, _ = self._acceptance_cache.popitem(last=False)
-                        print(f"[PkuPhyFermionBot] Evicted {evicted_key} from acceptance cache.")
+            if is_thread_root:
+                # 只要是私聊的根消息，且@了机器人，都视为激活状态
+                if mentioned_me: 
+                     assert thread_root_id
+                     self._mark_thread_as_accepted(thread_root_id)
             return True
     
     
@@ -114,32 +126,35 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
     )-> Dict[str, Any]:
 
         is_accepted: bool = thread_root_id in self._acceptance_cache
-        if not is_accepted:
-            print(f"[PkuPhyFermionBot] Thread {thread_root_id} not in acceptance cache. Ignoring.")
-
+        
         return {
+            "thread_root_id": thread_root_id,
             "is_accepted": is_accepted,
-            "owner": None,
+            "owner": None, # 话题发起者 OpenID
             "history": {
                 "prompt": [],
                 "images": [],
                 "roles": [],
             },
+            # 题目元数据
+            "problem_no": None,
+            "problem_text": None,
+            "problem_images": [],
+            "answer": "暂无",
+            "AI_solution": "暂无",
+            
+            # Workflow 相关
+            "trials": [], 
+            
+            # 文档相关
             "document_created": False,
             "document_id": None,
             "document_title": None,
             "document_url": None,
             "document_block_num": None,
-            "problem_no": None,
-            "problem_confirmed": False,
-            "problem_text": None,
-            "problem_images": None,
-            "answer": None,
-            "AI_solver_finished": False,
-            "AI_solution": "暂无",
-            "problem_archived": False,
-            "AI_solver_succeeded": None,
-            "comment_on_AI_solution": None,
+            
+            # 状态标记
+            "is_archived": False,
         }
     
     
@@ -148,11 +163,6 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         parsed_message: Dict[str, Any],
         context: Dict[str, Any],
     )-> None:
-        
-        """
-        维护 context 中 history 的用户侧消息
-        仅受理简单消息、复杂消息和纯图片消息
-        """
         
         message_id: str = parsed_message["message_id"]
         text: str = parsed_message["text"]
@@ -169,42 +179,12 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         context["history"]["prompt"].append(text)
         context["history"]["images"].extend(images)
         context["history"]["roles"].append("user")
-        
-        return None
     
     
-    async def _reply_message_in_context(
-        self,
-        context: Dict[str, Any],
-        response: str,
-        message_id: str,
-        images: List[bytes] = [],
-        hyperlinks: List[str] = [],
-    )-> None:
-        
-        """
-        兼有回复消息、维护 context 中 history 两个功能
-        """
-        
-        reply_message_result = await self.reply_message_async(
-            response = response,
-            message_id = message_id,
-            reply_in_thread = True,
-            images = images,
-            hyperlinks = hyperlinks,
-        )
-        if reply_message_result.success():
-            context["history"]["prompt"].append(response)
-            context["history"]["roles"].append("assistant")
-        else:
-            raise RuntimeError
-    
-        
     async def _sync_document_content_with_context(
         self,
         context: Dict[str, Any],
     )-> None:
-        
         """
         将内存中 context 的文档内容推至飞书云文档
         要求 document_id、problem_text、problem_images 和 answer 已设置
@@ -245,393 +225,323 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         return None
 
     
+    # -------------------------------------------------------------------------
+    # 业务逻辑核心路由
+    # -------------------------------------------------------------------------
+
     async def process_message_in_context(
         self,
         parsed_message: Dict[str, Any],
         context: Dict[str, Any],
     )-> Dict[str, Any]:
 
-        message_id: str = parsed_message["message_id"]
-        chat_type: str = parsed_message["chat_type"]
-        is_thread_root: bool = parsed_message["is_thread_root"]
-        text: str = parsed_message["text"]
-        mentioned_me: bool = parsed_message["mentioned_me"]
-        sender: Optional[str] = parsed_message["sender"]
+        message_id = parsed_message["message_id"]
+        chat_type = parsed_message["chat_type"]
+        is_thread_root = parsed_message["is_thread_root"]
+        text = parsed_message["text"]
+        mentioned_me = parsed_message["mentioned_me"]
+        sender = parsed_message["sender"]
         
-        # 群聊消息
+        # 1. 群聊消息路由
         if chat_type == "group":
-            # 是顶层消息
             if is_thread_root:
-                # 进入业务逻辑
-                if context["is_accepted"]:
-                    assert context["owner"] is None
-                    context["owner"] = sender
-                    pass
-                # 应该到不了这里
+                if mentioned_me:
+                    await self._start_user_specific_topic(context, parsed_message, sender)
                 else:
-                    raise RuntimeError
-            # 是话题内消息
+                    pass
             else:
-                # 顶层消息@了，鉴权后进入业务逻辑
                 if context["is_accepted"]:
                     if sender == context["owner"]:
-                        pass
+                        await self._handle_owner_input_in_topic(context, parsed_message)
                     else:
                         if mentioned_me:
                             await self.reply_message_async(
-                                response = "请在群聊中@我以发起我和您的专属话题~",
+                                response = f"您不是当前专属话题的发起者，请在群聊根消息 {self._mention_me_text} 以发起您自己的专属解题话题。",
                                 message_id = message_id,
                                 reply_in_thread = True,
                             )
-                            return context
-                        else:
-                            return context
-                # 顶层消息没有@，不进入业务逻辑
-                # 如果这一条消息@了，提示要在顶层消息中@
                 else:
                     if mentioned_me:
                         await self.reply_message_async(
-                            response = "请在群聊中@我以发起我和您的专属话题~",
+                            response = f"请在群聊的【根消息】处 {self._mention_me_text} 以发起新的解题话题，系统无法处理楼层中的请求。",
                             message_id = message_id,
                             reply_in_thread = True,
                         )
-                    return context
-        # 私聊消息
-        else:
-            # 鉴权
-            try:
-                is_admin = parsed_message["sender"] in self._config["admin_open_ids"]
-            except:
-                is_admin = False
-            # 指令处理
-            if text.strip().startswith("/"):
-                await self._execute_command(
-                    command_line = text.strip(),
-                    message_id = message_id,
-                    is_admin = is_admin,
-                    sender_id = sender,
-                )
-                return context
-            # 私聊提交题目
-            elif mentioned_me:
-                # 是顶层消息
-                if is_thread_root:
-                    # 进入业务逻辑
-                    if context["is_accepted"]:
-                        assert context["owner"] is None
-                        context["owner"] = sender
+                    else:
                         pass
-                    # 应该到不了这里
-                    else:
-                        raise RuntimeError
-                # 是话题内消息
+
+        # 2. 私聊消息路由
+        else:
+            if is_thread_root:
+                if text.strip().startswith("/"):
+                    await self._handle_command(parsed_message, context)
                 else:
-                    # 顶层消息@了，鉴权后进入业务逻辑
-                    if context["is_accepted"]:
-                        if sender == context["owner"]:
-                            pass
-                        else:
-                            if mentioned_me:
-                                await self.reply_message_async(
-                                    response = "请在话题根消息@我以发起我和您的专属话题~",
-                                    message_id = message_id,
-                                    reply_in_thread = True,
-                                )
-                                return context
-                            else:
-                                return context
-                    # 顶层消息没有@，不进入业务逻辑
-                    # 如果这一条消息@了，提示要在顶层消息中@
+                    if mentioned_me:
+                        await self._start_user_specific_topic(context, parsed_message, sender)
                     else:
-                        if mentioned_me:
-                            await self.reply_message_async(
-                                response = "请在在话题根消息@我以发起我和您的专属话题~",
-                                message_id = message_id,
-                                reply_in_thread = True,
-                            )
-                        return context
-            # 发送教程
+                        await self._send_tutorial(message_id)
             else:
-                await self.reply_message_async(
-                    response = "请在群聊中@我以发起我和您的专属话题~您可以拉一个我和您的小群，正在向您发送教程...",
-                    message_id = message_id,
-                )
-                await self.reply_message_async(
-                    response = self.image_placeholder * 5,
-                    message_id = message_id,
-                    images = [
-                        f"pictures{seperator}PKU_PHY_fermion{seperator}create_group_instructions{seperator}{no}.png"
-                        for no in range(1, 6)
-                    ],
-                )
-                await self.reply_message_async(
-                    response = "相关教程已发送，请您查阅！",
-                    message_id = message_id,
-                )
-                return context
-        
-        print(f" -> [Worker] 收到任务: {text}，开始处理")
-        await self._maintain_context_history(
-            parsed_message = parsed_message,
-            context = context,
-        )
-        
-        if not context["document_created"]:
-            
-            # 这句话不记录在会话历史中
-            await self.reply_message_async(
-                response = "您的题目已受理，请稍候...",
-                message_id = message_id,
-                reply_in_thread = True,
-            )
-            
-            assert len(context["history"]["prompt"]) == 1
-            message = context["history"]["prompt"][0]
-            message = message.replace(self.image_placeholder, "")
-            message = message.replace(self._mention_me_text, "")
-            problem_images = context["history"]["images"]
-            understand_problem_result = await understand_problem_async_former(
-                message = message,
-                problem_images = problem_images,
-                model = self._config["problem_understanding"]["model"],
-                temperature = self._config["problem_understanding"]["temperature"],
-                timeout = self._config["problem_understanding"]["timeout"],
-                trial_num = self._config["problem_understanding"]["trial_num"],
-                trial_interval = self._config["problem_understanding"]["trial_interval"],
-            )
-            problem_title = understand_problem_result["problem_title"]
-            problem_text = understand_problem_result["problem_text"]
-            answer = understand_problem_result["answer"]
-            
-            problem_text_rendering_coroutine = self._render_equation_async(
-                text = problem_text,
-                model = self._config["equation_rendering"]["model"],
-                temperature = self._config["equation_rendering"]["temperature"],
-                timeout = self._config["equation_rendering"]["timeout"],
-                trial_num = self._config["equation_rendering"]["trial_num"],
-                trial_interval = self._config["equation_rendering"]["trial_interval"],
-            )
-            answer_rendering_coroutine = self._render_equation_async(
-                text = answer,
-                model = self._config["equation_rendering"]["model"],
-                temperature = self._config["equation_rendering"]["temperature"],
-                timeout = self._config["equation_rendering"]["timeout"],
-                trial_num = self._config["equation_rendering"]["trial_num"],
-                trial_interval = self._config["equation_rendering"]["trial_interval"],
-            )
-            problem_text = await problem_text_rendering_coroutine
-            answer = await answer_rendering_coroutine
-            
-            problem_text = problem_text + len(problem_images) * self.image_placeholder
-            
-            problem_no = await self._get_problem_no()
-            document_title = f"题目 {problem_no} | {problem_title}"
-            document_id = await self.create_document_async(
-                title = document_title,
-                folder_token = self._config["problem_set_folder_token"],
-            )
-            document_url = get_lark_document_url(
-                tenant = self._config["association_tenant"],
-                document_id = document_id,
-            )
-            
-            context["document_created"] = True
-            context["document_id"] = document_id
-            context["document_title"] = document_title
-            context["document_url"] = document_url
-            context["document_block_num"] = 0
-            context["problem_no"] = problem_no
-            context["problem_text"] = problem_text
-            context["problem_images"] = problem_images
-            context["answer"] = answer
-            
-            self._problem_id_to_context[problem_no] = context
-            
-            await self._sync_document_content_with_context(
-                context = context,
-            )
+                if context["is_accepted"]:
+                    await self._handle_owner_input_in_topic(context, parsed_message)
+                else:
+                    await self._send_tutorial(message_id)
 
-            await self._reply_message_in_context(
-                context = context,
-                response = f"您的题目已整理进文档{self.begin_of_hyperlink}{document_title}{self.end_of_hyperlink}，正在进一步处理中，请稍等...",
-                message_id = message_id,
-                hyperlinks = [document_url],
-            )
-
-            return await self._try_to_confirm_problem(
-                context = context,
-                message_id = message_id,
-            )
-        
-        elif not context["problem_confirmed"]:
-            return await self._try_to_confirm_problem(
-                context = context,
-                message_id = message_id,
-            )
-        
-        elif not context["AI_solver_finished"]:
-            raise RuntimeError
-        
-        elif not context["problem_archived"]:
-            return await self._try_to_archive_problem(
-                context = context,
-                message_id = message_id,
-            )
-        
-        else:
-            await self.reply_message_async(
-                response = "感谢您的参与！此话题即将不被受理；如有任何疑问，请联系志愿者~",
-                message_id = message_id,
-            )
-            return context
-    
-    
-    async def _try_to_confirm_problem(
-        self,
-        context: Dict[str, Any],
-        message_id: str,
-    )-> Dict[str, Any]:
-        
-        problem_text = context["problem_text"]
-        problem_images = context["problem_images"]
-        answer = context["answer"]
-        history = context["history"]
-        
-        confirm_problem_result = await confirm_problem_async_former(
-            problem_text = problem_text,
-            problem_images = problem_images,
-            answer = answer,
-            history = history,
-            model = self._config["problem_confirming"]["model"],
-            temperature = self._config["problem_confirming"]["temperature"],
-            timeout = self._config["problem_confirming"]["timeout"],
-            trial_num = self._config["problem_confirming"]["trial_num"],
-            trial_interval = self._config["problem_confirming"]["trial_interval"],
-        )
-        
-        new_problem_text = confirm_problem_result["new_problem_text"]
-        new_answer = confirm_problem_result["new_answer"]
-        succeeded = confirm_problem_result["succeeded"]
-        response = confirm_problem_result["response"]
-        
-        response = response.replace(self.begin_of_equation, "$")
-        response = response.replace(self.end_of_equation, "$")
-        
-        problem_text_rendering_coroutine = self._render_equation_async(
-            text = new_problem_text,
-            model = self._config["equation_rendering"]["model"],
-            temperature = self._config["equation_rendering"]["temperature"],
-            timeout = self._config["equation_rendering"]["timeout"],
-            trial_num = self._config["equation_rendering"]["trial_num"],
-            trial_interval = self._config["equation_rendering"]["trial_interval"],
-        ) \
-            if new_problem_text else None
-        answer_rendering_coroutine = self._render_equation_async(
-            text = new_answer,
-            model = self._config["equation_rendering"]["model"],
-            temperature = self._config["equation_rendering"]["temperature"],
-            timeout = self._config["equation_rendering"]["timeout"],
-            trial_num = self._config["equation_rendering"]["trial_num"],
-            trial_interval = self._config["equation_rendering"]["trial_interval"],
-        ) \
-            if new_answer else None
-        if problem_text_rendering_coroutine or answer_rendering_coroutine:
-            if problem_text_rendering_coroutine:
-                context["problem_text"] = await problem_text_rendering_coroutine
-            if answer_rendering_coroutine:
-                context["answer"] = await answer_rendering_coroutine
-            await self._sync_document_content_with_context(
-                context = context,
-            )
-        
-        await self._reply_message_in_context(
-            context = context,
-            response = response,
-            message_id = message_id,
-        )
-        
-        if succeeded:
-            context["problem_confirmed"] = True
-            return await self._try_to_solve_problem(
-                context = context,
-                message_id = message_id,
-            )
-        else:
-            return context
-    
-    
-    async def _try_to_solve_problem(
-        self,
-        context: Dict[str, Any],
-        message_id: str,
-    ) -> Dict[str, Any]:
-        
-        """
-        调用 AI 进行解题，并渲染结果
-        """
-        
-        problem_text = context["problem_text"]
-        problem_images = context["problem_images"]
-        
-        await self._reply_message_in_context(
-            context = context,
-            response = "正在调用 AI 解题，请稍候...如果您的题目困难，AI 可能需要较长时间思考",
-            message_id = message_id,
-        )
-        
-        solve_problem_result = await solve_problem_async_former(
-            problem_text = problem_text,
-            problem_images = problem_images,
-            model = self._config["problem_solving"]["model"],
-            temperature = self._config["problem_solving"]["temperature"],
-            timeout = self._config["problem_solving"]["timeout"],
-            trial_num = self._config["problem_solving"]["trial_num"],
-            trial_interval = self._config["problem_solving"]["trial_interval"],
-        )
-        AI_solution = solve_problem_result["AI_solution"]
-        
-        AI_solution = await self._render_equation_async(
-            text = AI_solution,
-            model = self._config["equation_rendering"]["model"],
-            temperature = self._config["equation_rendering"]["temperature"],
-            timeout = self._config["equation_rendering"]["timeout"],
-            trial_num = self._config["equation_rendering"]["trial_num"],
-            trial_interval = self._config["equation_rendering"]["trial_interval"],
-        )
-        
-        context["AI_solution"] = AI_solution
-        context["AI_solver_finished"] = True
-
-        await self._sync_document_content_with_context(
-            context = context,
-        )
-        
-        await self._reply_message_in_context(
-            context = context,
-            response = "AI 已完成解答，云文档内容已更新，请您查阅！",
-            message_id = message_id,
-        )
-        
         return context
 
+    # -------------------------------------------------------------------------
+    # 动作原语 (Action Primitives)
+    # -------------------------------------------------------------------------
 
-    async def _try_to_archive_problem(
+    async def _start_user_specific_topic(
         self,
         context: Dict[str, Any],
-        message_id: str,
-    ) -> Dict[str, Any]:
+        parsed_message: Dict[str, Any],
+        sender: Optional[str],
+    ) -> None:
+        """
+        发起用户专属解题话题
+        """
+        # 强校验：进入此函数时，该 Topic 必须是全新的，Owner 必须为空
+        # 如果这里触发 assert error，说明上游路由逻辑出现了严重 bug
+        assert context["owner"] is None, f"Topic {context['thread_root_id']} already has owner: {context['owner']}"
+
+        message_id = parsed_message["message_id"]
         
-        await self._reply_message_in_context(
-            context = context,
-            response = "题目归档功能暂时未实现，流程到此结束。感谢您的使用！",
+        context["owner"] = sender
+        context["is_accepted"] = True
+        
+        # 记录第一条消息作为题目描述
+        await self._maintain_context_history(parsed_message, context)
+        
+        # 临时回复
+        await self.reply_message_async(
+            response = "正在解析您的题目并创建云文档，请稍候...",
             message_id = message_id,
+            reply_in_thread = True
         )
 
-        context["problem_archived"] = True
+        # 1. 理解题目
+        raw_text = context["history"]["prompt"][0]
+        raw_images = context["history"]["images"]
         
-        return context
-    
-    
+        # 替换占位符以清理输入
+        clean_text = raw_text.replace(self.image_placeholder, "").replace(self._mention_me_text, "")
+
+        understand_result = await understand_problem_async(
+            message = clean_text,
+            problem_images = raw_images,
+            model = self._config["problem_understanding"]["model"],
+            temperature = self._config["problem_understanding"]["temperature"],
+            timeout = self._config["problem_understanding"]["timeout"],
+            trial_num = self._config["problem_understanding"]["trial_num"],
+            trial_interval = self._config["problem_understanding"]["trial_interval"],
+        )
+
+        if not understand_result:
+            await self.reply_message_async("题目解析失败，请重试。", message_id, reply_in_thread=True)
+            return
+        
+        problem_title = understand_result["problem_title"]
+        problem_text = understand_result["problem_text"]
+        answer = understand_result["answer"]
+
+        # 2. 渲染公式
+        problem_text_task = self._render_equation_async(
+            text = problem_text,
+            model = self._config["equation_rendering"]["model"],
+            temperature = self._config["equation_rendering"]["temperature"],
+            timeout = self._config["equation_rendering"]["timeout"],
+            trial_num = self._config["equation_rendering"]["trial_num"],
+            trial_interval = self._config["equation_rendering"]["trial_interval"],
+        )
+        answer_task = self._render_equation_async(
+            text = answer,
+            model = self._config["equation_rendering"]["model"],
+            temperature = self._config["equation_rendering"]["temperature"],
+            timeout = self._config["equation_rendering"]["timeout"],
+            trial_num = self._config["equation_rendering"]["trial_num"],
+            trial_interval = self._config["equation_rendering"]["trial_interval"],
+        )
+        
+        problem_text, answer = await asyncio.gather(problem_text_task, answer_task)
+
+        # 为图片预留位置：LarkBot 要求 placeholder 数量与 images 列表一致
+        problem_text = problem_text + len(raw_images) * self.image_placeholder
+
+        # 3. 获取编号并创建文档
+        problem_no = await self._get_problem_no()
+        document_title = f"题目 {problem_no} | {problem_title}"
+        
+        document_id = await self.create_document_async(
+            title = document_title,
+            folder_token = self._config["problem_set_folder_token"],
+        )
+        document_url = get_lark_document_url(
+            tenant = self._config["association_tenant"],
+            document_id = document_id,
+        )
+
+        # 4. 更新 Context
+        context["problem_no"] = problem_no
+        context["problem_text"] = problem_text
+        context["problem_images"] = raw_images
+        context["answer"] = answer
+        context["document_created"] = True
+        context["document_id"] = document_id
+        context["document_title"] = document_title
+        context["document_url"] = document_url
+        context["document_block_num"] = 0
+        
+        self._problem_id_to_context[problem_no] = context
+
+        # 5. 同步文档内容
+        await self._sync_document_content_with_context(context)
+
+        # 6. 正式回复用户
+        await self.reply_message_async(
+            response = (
+                f"已为您创建专属解题话题 #{problem_no}，文档已生成。\n"
+                f"🔗 {document_url}\n"
+                f"正在使用 [Default] 工作流进行解答，请稍候。"
+            ),
+            message_id = message_id,
+            reply_in_thread = True
+        )
+
+        # 7. 启动默认 Workflow
+        await self._run_workflow(context, "default")
+
+
+    async def _handle_owner_input_in_topic(
+        self,
+        context: Dict[str, Any],
+        parsed_message: Dict[str, Any],
+    ) -> None:
+        """
+        处理 Owner 在话题内的发言
+        """
+        # 强校验：进入此函数时，Context 必须已有 Owner 且与 Sender 一致（在 process_message 中已判断，此处再次确保）
+        assert context["owner"] == parsed_message["sender"]
+        
+        message_id = parsed_message["message_id"]
+        text = parsed_message["text"].strip()
+        
+        await self._maintain_context_history(parsed_message, context)
+        
+        if text == "深度思考":
+            await self.reply_message_async("收到，正在切换至 [Deep Think] 工作流。", message_id, reply_in_thread=True)
+            await self._run_workflow(context, "deep_think")
+        elif text == "默认解题":
+            await self.reply_message_async("收到，正在切换至 [Default] 工作流。", message_id, reply_in_thread=True)
+            await self._run_workflow(context, "default")
+        else:
+            # 默认回复：展示菜单 (Plain text style)
+            menu = (
+                "收到您的消息。\n"
+                "如需切换解题模式，请回复以下关键词：\n"
+                "[默认解题] 快速获取基础解答\n"
+                "[深度思考] 启用慢思考模式，多角度分析\n"
+                "您也可以继续补充题目信息或图片。"
+            )
+            await self.reply_message_async(menu, message_id, reply_in_thread=True)
+
+
+    async def _send_tutorial(self, message_id: str) -> None:
+        """
+        发送教程
+        """
+        tutorial_text = (
+            "简易使用说明：\n"
+            "1. 发起解题：请在群聊新建消息并 @我，或直接私聊发送题目。\n"
+            "2. 指令系统：私聊输入 /help 可查看可用指令。\n"
+            "3. 工作流：话题建立后，可按提示切换 AI 解题模式。"
+        )
+        await self.reply_message_async(tutorial_text, message_id)
+
+
+    async def _handle_command(
+        self,
+        parsed_message: Dict[str, Any],
+        context: Dict[str, Any],
+    ) -> None:
+        """
+        处理指令
+        """
+        message_id = parsed_message["message_id"]
+        text = parsed_message["text"]
+        sender = parsed_message["sender"]
+        
+        # 直接获取，不兜底
+        is_admin = sender in self._config["admin_open_ids"]
+
+        await self._execute_command(
+            command_line = text,
+            message_id = message_id,
+            is_admin = is_admin,
+            sender_id = sender
+        )
+
+
+    # -------------------------------------------------------------------------
+    # Workflow & Trial Management
+    # -------------------------------------------------------------------------
+
+    async def _run_workflow(
+        self,
+        context: Dict[str, Any],
+        workflow_name: str,
+    ) -> None:
+        """
+        执行一次 Trial
+        """
+        # 直接获取，如果 key 不存在，直接 KeyError Fast Fail，不写 "if not func return"
+        workflow_func = self._workflows[workflow_name]
+        
+        # 记录开始
+        trial_record = {
+            "workflow": workflow_name,
+            "status": "running",
+            "start_time": get_time_stamp(),
+            "result": None
+        }
+        context["trials"].append(trial_record)
+        
+        try:
+            await workflow_func(context)
+            trial_record["status"] = "success"
+        except Exception as e:
+            trial_record["status"] = "failed"
+            trial_record["error"] = str(e)
+            # Worker 线程内的异常最好打印出来，防止静默失败
+            print(f"[PkuPhyFermionBot] Workflow {workflow_name} failed: {e}")
+
+
+    # -------------------------------------------------------------------------
+    # Workflows Implementations (Stubs)
+    # -------------------------------------------------------------------------
+
+    async def _workflow_default(
+        self,
+        context: Dict[str, Any],
+    ) -> None:
+        # TODO: 实现具体的 LLM 调用、Equation Rendering、文档更新逻辑
+        # 开发者可以直接从 context["problem_text"] 和 context["problem_images"] 获取输入
+        # 完成解答后，更新 context["AI_solution"] 并调用 self._sync_document_content_with_context(context)
+        raise NotImplementedError("Default workflow logic to be implemented.")
+
+
+    async def _workflow_deep_think(
+        self,
+        context: Dict[str, Any],
+    ) -> None:
+        # TODO: 实现 Chain-of-Thought 或其他高级逻辑
+        raise NotImplementedError("Deep think workflow logic to be implemented.")
+
+
+    # -------------------------------------------------------------------------
+    # Command Executor (Linux Console Style)
+    # -------------------------------------------------------------------------
+
     async def _execute_command(
         self,
         command_line: str,
@@ -644,189 +554,176 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         if not args: return
         command = args[0].lower()
         
+        # ---------------------------------------------------------
+        # User Commands
+        # ---------------------------------------------------------
+
         if command == "/me":
-            contribution_count = "N/A (暂无数据库)" 
-            role = "👑 管理员" if is_admin else "👤 普通用户"
+            role = "admin" if is_admin else "user"
             response_text = (
-                f"📋 **用户档案 (User Profile)**\n"
-                f"━━━━━━━━━━━━━━━━\n"
-                f"🆔 **Open ID**: `{sender_id}`\n"
-                f"🛡️ **身份权限**: {role}\n"
-                f"🏆 **贡献题目**: `{contribution_count}`\n"
-                f"━━━━━━━━━━━━━━━━"
+                f"```text\n"
+                f"USER_PROFILE\n"
+                f"------------\n"
+                f"open_id: {sender_id}\n"
+                f"role:    {role}\n"
+                f"```"
             )
             await self.reply_message_async(response_text, message_id)
             return
 
         elif command == "/you":
             response_text = (
-                f"🤖 **北大物院-费米子活动机器人**\n"
-                f"━━━━━━━━━━━━━━━━\n"
-                f"🆔 **Bot ID**: `{self._config['open_id']}`\n"
-                f"🧠 **内核版本**: PkuPhyFermionBot v0.1.0\n"
-                f"🏫 **所属单位**: 北京大学物理学院\n"
-                f"✨ **Slogan**: 像费米子一样，虽独一无二，却共同构建物质世界。\n"
-                f"━━━━━━━━━━━━━━━━"
+                f"```text\n"
+                f"BOT_INFO\n"
+                f"--------\n"
+                f"id:      {self._config['open_id']}\n"
+                f"version: PkuPhyFermionBot v0.2.5\n"
+                f"unit:    PKU Physics\n"
+                f"kernel:  linux_compat_mode\n"
+                f"```"
             )
             await self.reply_message_async(response_text, message_id)
             return
         
         elif command == "/help":
             help_text = (
-                "🛠️ **指令帮助列表**\n"
-                "━━━━━━━━━━━━━━━━\n"
-                "**用户指令**:\n"
-                "• `/me`: 查看个人档案与权限\n"
-                "• `/you`: 查看机器人信息\n"
-                "• `/help`: 获取此帮助菜单\n"
+                "```text\n"
+                "NAME\n"
+                "    PkuPhyFermionBot - The physics problem organizer\n\n"
+                "USER COMMANDS\n"
+                "    /me     Show user profile (OpenID, Role)\n"
+                "    /you    Show bot instance info\n\n"
             )
             if is_admin:
                 help_text += (
-                    "\n**管理员指令**:\n"
-                    "• `/stats`: 查看题库统计\n"
-                    "• `/update_config`: 热更新配置\n"
-                    "• `/glance <start> <end>`: 批量概览题目\n"
-                    "• `/view {id|-1|random} [--verbose]`: 查看题目详情\n"
+                    "ADMIN COMMANDS\n"
+                    "    /stats\n"
+                    "        Show real-time problem collection statistics.\n\n"
+                    "    /glance <start_id> <end_id>\n"
+                    "        Quick overview of a range of problems.\n\n"
+                    "    /view <id|-1|random> [--verbose]\n"
+                    "        Inspect problem context. -1 for latest.\n\n"
+                    "    /update_config [path]\n"
+                    "        Hot-reload configuration. Default path used if omitted.\n"
                 )
-            help_text += "━━━━━━━━━━━━━━━━"
+            help_text += "```"
             await self.reply_message_async(help_text, message_id)
             return
 
-        elif command == "/stats":
-            if not is_admin:
-                await self.reply_message_async("🚫 **权限拒绝**: 该指令仅限管理员使用。", message_id)
-                return
-            
-            current_total = self._next_problem_no - 1
-            response_text = (
-                f"📊 **题库统计面板 (Admin)**\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"🔢 **入库总数**: `{current_total}` 题\n"
-                f"🆕 **最新编号**: `#{current_total}`\n"
-                f"📉 **今日新增**: N/A\n"
-                f"━━━━━━━━━━━━━━"
-            )
-            await self.reply_message_async(response_text, message_id)
+        # ---------------------------------------------------------
+        # Admin Commands (Fast Fail on permission)
+        # ---------------------------------------------------------
+
+        if not is_admin:
+            await self.reply_message_async("```text\nEACCES: Permission denied\n```", message_id)
             return
 
-        elif command == "/update_config":
-            if not is_admin:
-                await self.reply_message_async("🚫 **权限拒绝**: 该指令仅限管理员使用。", message_id)
-                return
-            
-            await self.reply_message_async("🔄 正在重新加载配置文件，请稍候...", message_id)
-            result_content = await self._reload_config_async(self._config_path)
-            
-            if len(result_content.splitlines()) > 100:
-                truncated_result_content = "\n".join(
-                    result_content.splitlines()[:100] + ["..."]
-                )
-            else:
-                truncated_result_content = result_content
-            response_text = (
-                f"✅ **配置更新完成！**\n"
-                f"📂 **来源**: `{self._config_path}`\n"
-                f"📄 **当前内容摘要**:\n"
-                f"{truncated_result_content}\n"
-                f"(已加载至内存)"
-            )
-            await self.reply_message_async(response_text, message_id)
+        if command == "/stats":
+            current_total = self._next_problem_no - 1
+            # 假设这里可以快速获取内存占用或其他 runtime 信息
+            await self.reply_message_async(f"```text\nTOTAL_PROBLEMS: {current_total}\n```", message_id)
             return
 
         elif command == "/glance":
-            if not is_admin:
-                await self.reply_message_async("🚫 **权限拒绝**: 该指令仅限管理员使用。", message_id)
-                return
-            
             if len(args) < 3:
-                await self.reply_message_async("⚠️ 参数错误。用法: `/glance <start_id> <end_id>`", message_id)
+                await self.reply_message_async("```text\nUsage: /glance <start> <end>\n```", message_id)
                 return
             
             try:
                 start_id = int(args[1])
                 end_id = int(args[2])
             except ValueError:
-                await self.reply_message_async("⚠️ ID 必须是整数。", message_id)
+                await self.reply_message_async("```text\nERR: IDs must be integers.\n```", message_id)
                 return
             
-            if end_id - start_id > 20:
-                await self.reply_message_async("⚠️ 为了避免消息过长，单次概览请不要超过 20 条。", message_id)
+            if end_id < start_id:
+                await self.reply_message_async("```text\nERR: End ID must be >= Start ID.\n```", message_id)
                 return
-            
-            response_lines = [f"📑 **题目概览 (#{start_id} - #{end_id})**"]
-            
+                
+            if end_id - start_id > 50:
+                await self.reply_message_async("```text\nERR: Range too large (max 50).\n```", message_id)
+                return
+
+            lines = [f"GLANCE ({start_id} -> {end_id})"]
             for pid in range(start_id, end_id + 1):
                 ctx = self._problem_id_to_context.get(pid)
                 if ctx:
-                    doc_url = ctx.get("document_url", "链接未知")
-                    title = ctx.get("document_title", "无标题").split("|")[-1].strip()
-                    response_lines.append(f"• `#{pid}`: [{title}]({doc_url})")
+                    title = ctx.get("document_title", "Untitled").split("|")[-1].strip()
+                    status = "[ARC]" if ctx.get("is_archived") else "[ACT]"
+                    lines.append(f"#{pid:<4} {status} {title[:20]}")
                 else:
-                    response_lines.append(f"• `#{pid}`: ⚠️ (暂无数据，可能尚未加载)")
-                
-            await self.reply_message_async("\n".join(response_lines), message_id)
+                    lines.append(f"#{pid:<4} [N/A]")
+            
+            report = "\n".join(lines)
+            await self.reply_message_async(f"```text\n{report}\n```", message_id)
             return
 
         elif command == "/view":
-            if not is_admin:
-                await self.reply_message_async("🚫 **权限拒绝**: 该指令仅限管理员使用。", message_id)
-                return
-            
             if len(args) < 2:
-                await self.reply_message_async("⚠️ 参数错误。用法: `/view {id|-1|random}`", message_id)
+                await self.reply_message_async("```text\nUsage: /view <id|-1|random> [--verbose]\n```", message_id)
                 return
             
-            target = args[1]
+            target_str = args[1]
             verbose = "--verbose" in args
             
-            target_id = -1
-            if target == "-1":
-                target_id = self._next_problem_no - 1
-            elif target == "random":
-                if self._next_problem_no > 1:
-                    target_id = random.randint(1, self._next_problem_no - 1)
+            try:
+                current_max = self._next_problem_no - 1
+                if target_str == "-1":
+                    target_id = current_max
+                elif target_str == "random":
+                    if current_max < 1:
+                        await self.reply_message_async("```text\nERR: Database empty.\n```", message_id)
+                        return
+                    target_id = random.randint(1, current_max)
                 else:
-                    await self.reply_message_async("⚠️ 题库为空。", message_id)
-                    return
-            else:
-                try:
-                    target_id = int(target)
-                except ValueError:
-                    await self.reply_message_async("⚠️ ID 格式错误。", message_id)
-                    return
-            
-            if target_id >= self._next_problem_no or target_id <= 0:
-                await self.reply_message_async(f"⚠️ 题目 `#{target_id}` 不存在。", message_id)
+                    target_id = int(target_str)
+            except ValueError:
+                await self.reply_message_async("```text\nERR: Invalid ID format.\n```", message_id)
                 return
-            target_context = self._problem_id_to_context.get(target_id)
+
+            ctx = self._problem_id_to_context.get(target_id)
+            if not ctx:
+                await self.reply_message_async(f"```text\nERR: Problem #{target_id} not found in memory.\n```", message_id)
+                return
             
-            if target_context:
-                doc_title = target_context.get("document_title", "未知标题")
-                doc_url = target_context.get("document_url", "#")
-                status_icon = "✅" if target_context.get("problem_archived") else "⏳"
-                
-                response_text = (
-                    f"📄 **题目详情 #{target_id}**\n"
-                    f"━━━━━━━━━━━━━━\n"
-                    f"📑 **标题**: {doc_title}\n"
-                    f"🔗 **文档**: [点击跳转]({doc_url})\n"
-                    f"🚦 **状态**: {status_icon}\n"
-                    f"━━━━━━━━━━━━━━"
-                )
-                
-                if verbose:
-                    debug_view = {k: v for k, v in target_context.items() if k != "history"}
-                    json_str = json.dumps(debug_view, indent=2, ensure_ascii=False, default=str)
-                    response_text += f"\n\n🔧 **Context Dump (Verbose)**:\n```json\n{json_str}\n```"
-            else:
-                response_text = f"⚠️ **查询失败**: 编号 `#{target_id}` 虽然在范围内，但内存中无此记录 (可能重启丢失)。"
+            # Info View
+            doc_url = ctx.get("document_url", "N/A")
+            status = "Archived" if ctx.get("is_archived") else "Active"
+            workflow = ctx["trials"][-1]["workflow"] if ctx["trials"] else "None"
             
-            await self.reply_message_async(response_text, message_id)
+            info = (
+                f"PROBLEM_ID:   {target_id}\n"
+                f"STATUS:       {status}\n"
+                f"LAST_WORKFLOW:{workflow}\n"
+                f"DOC_URL:      {doc_url}\n"
+            )
+            
+            if verbose:
+                # Deep dump for debugging
+                import json
+                # 过滤掉 heavy 的 history，只看状态
+                debug_view = {k: v for k, v in ctx.items() if k != "history"}
+                # 也可以简略显示 history 长度
+                debug_view["history_len"] = len(ctx["history"].get("prompt", []))
+                
+                json_str = json.dumps(debug_view, indent=2, default=str, ensure_ascii=False)
+                info += f"\nCONTEXT_DUMP:\n{json_str}"
+
+            await self.reply_message_async(f"```text\n{info}\n```", message_id)
+            return
+
+        elif command == "/update_config":
+            target_path = args[1] if len(args) > 1 else self._config_path
+            
+            await self.reply_message_async(f"Loading config from {target_path}...", message_id)
+            try:
+                result_content = await self._reload_config_async(target_path)
+                preview = result_content[:80].replace("\n", "\\n")
+                await self.reply_message_async(f"```text\nOK. Config reloaded.\nPreview: {preview}...\n```", message_id)
+            except Exception as e:
+                await self.reply_message_async(f"```text\nERR: Reload failed.\n{str(e)}\n```", message_id)
             return
 
         else:
-            await self.reply_message_async(
-                response = f"⚠️ **未知指令**: `{command}`\n请输入 `/help` 查看可用指令列表。",
-                message_id = message_id,
-            )
+            await self.reply_message_async(f"```text\nERR: Unknown command '{command}'\n```", message_id)
             return
