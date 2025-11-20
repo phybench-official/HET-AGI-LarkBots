@@ -1,9 +1,8 @@
 from ....fundamental import *
 from .equation_rendering import *
-from .problem_understanding import *
-from .problem_confirming import *
-from .problem_solving import *
-from .problem_archiving import *
+from .problem_understanding_former import *
+from .problem_confirming_former import *
+from .problem_solving_former import *
 
 
 __all__ = [
@@ -391,7 +390,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             message = message.replace(self.image_placeholder, "")
             message = message.replace(self._mention_me_text, "")
             problem_images = context["history"]["images"]
-            understand_problem_result = await understand_problem_async(
+            understand_problem_result = await understand_problem_async_former(
                 message = message,
                 problem_images = problem_images,
                 model = self._config["problem_understanding"]["model"],
@@ -498,7 +497,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         answer = context["answer"]
         history = context["history"]
         
-        confirm_problem_result = await confirm_problem_async(
+        confirm_problem_result = await confirm_problem_async_former(
             problem_text = problem_text,
             problem_images = problem_images,
             answer = answer,
@@ -580,7 +579,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             message_id = message_id,
         )
         
-        solve_problem_result = await solve_problem_async(
+        solve_problem_result = await solve_problem_async_former(
             problem_text = problem_text,
             problem_images = problem_images,
             model = self._config["problem_solving"]["model"],

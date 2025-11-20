@@ -2,11 +2,11 @@ from ....fundamental import *
 
 
 __all__ = [
-    "confirm_problem_async",
+    "confirm_problem_async_former",
 ]
 
 
-async def confirm_problem_async(
+async def confirm_problem_async_former(
     problem_text: str,
     problem_images: List[bytes],
     answer: str,
