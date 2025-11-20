@@ -245,7 +245,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         
         message_id = parsed_message["message_id"]
         await self.reply_message_async(
-            response = "您的题目已受理，正在解析并创建文档...",
+            response = "您的题目已受理，请稍候...",
             message_id = message_id,
             reply_in_thread = True
         )
@@ -350,9 +350,9 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         # 构建菜单和响应
         workflow_menu, _ = self._get_workflow_menu_and_mapping()
         response_text = (
-            f"专属话题 #{problem_no} 已创建。\n"
-            f"文档链接: {self.begin_of_hyperlink}{document_title}{self.end_of_hyperlink}\n"
+            f"您的题目已整理进文档 {self.begin_of_hyperlink}{document_title}{self.end_of_hyperlink}\n"
             f"已在后台启动默认工作流: {', '.join(self._default_workflows)}\n\n"
+            f"您可以稍作等待，也可以调用其他工作流："
             f"{workflow_menu}"
         )
 
@@ -378,6 +378,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
                 message_id = message_id,
                 reply_in_thread = True
             )
+            return
             
         text = parsed_message["text"].strip()
         if "归档" in text:
@@ -400,20 +401,19 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
                 target_workflow = mapping[index]
         elif text in self._workflows:
             target_workflow = text
+            
+        async with context["lock"]:
+            running_workflows = context["running_workflows"]
         
         if target_workflow:
             asyncio.create_task(self._run_workflow(context, target_workflow, message_id))
-            async with context["lock"]:
-                running_workflows = context["running_workflows"]
             await self.reply_message_async(
-                response = f"收到。已启动 [{target_workflow}] 工作流。\n当前有 {running_workflows} 个工作流正在运行。",
+                response = f"收到。已启动 [{target_workflow}] 工作流。\n当前有 {running_workflows + 1} 个工作流正在运行。",
                 message_id = message_id,
-                reply_in_thread = True
+                reply_in_thread = True,
             )
         else:
             status_hint = ""
-            async with context["lock"]:
-                running_workflows = context["running_workflows"]
             if running_workflows == 0:
                 status_hint = "\n当前无运行中的工作流。若已完成解题，您可以输入“归档”终止此解题话题。"
             else:
