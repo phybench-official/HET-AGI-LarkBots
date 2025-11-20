@@ -1,16 +1,9 @@
 name: Build and Push Docker Image
 
-# 🎯 仅在以下情况触发构建：
-# 1. 创建版本标签（v*）- 正式发布
-# 2. 手动触发 workflow_dispatch - 按需构建
-
 on:
-  # 仅在创建版本标签时自动构建
   push:
     tags:
       - 'v*'
-
-  # 支持手动触发构建
   workflow_dispatch:
     inputs:
       tag:
@@ -28,6 +21,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -51,13 +47,13 @@ jobs:
             type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
 
       - name: Build and push
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64
+          provenance: false
