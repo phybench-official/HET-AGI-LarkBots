@@ -15,7 +15,6 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
 
     def __init__(
         self,
-        lark_bot_name: str,
         config_path: str,
         worker_timeout: float = 600.0,
         context_cache_size: int = 1024,
@@ -23,19 +22,18 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
     )-> None:
 
         super().__init__(
-            lark_bot_name = lark_bot_name,
+            config_path = config_path,
             worker_timeout = worker_timeout,
             context_cache_size = context_cache_size,
             max_workers = max_workers,
         )
         
         # start 动作的逻辑是会在子进程中再跑一个机器人
-        # 这样可以把不同机器人隔离在不同进程中，防止底层库报错
+        # 这样可以暴露简洁的 API，把不同机器人隔离在不同进程中，防止底层库报错
         # 这背后依赖属性 _init_arguments
         # 所以子类如果签名改变，有义务自行维护 _init_arguments
         # 另外，由于会被运行两次，所以 __init__ 方法应是轻量级且幂等的
         self._init_arguments: Dict[str, Any] = {
-            "lark_bot_name": lark_bot_name,
             "config_path": config_path,
             "worker_timeout": worker_timeout,
             "context_cache_size": context_cache_size,
@@ -45,7 +43,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         self._acceptance_cache_size: int = context_cache_size
         self._acceptance_cache: OrderedDict[str, bool] = OrderedDict()
         
-        self._mention_me_text = f"@{self._name}"
+        self._mention_me_text = f"@{self._config['name']}"
         self._render_equation_async = lambda text, **inference_arguments: render_equation_async(
             text = text,
             begin_of_equation = self.begin_of_equation,
@@ -56,33 +54,6 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         self._next_problem_no = 1
         self._next_problem_no_lock = asyncio.Lock()
         self._problem_id_to_context: Dict[int, Dict[str, Any]] = {}
-        
-        self._config_path = config_path
-        self._load_config(config_path)
-        
-        
-    def _load_config(
-        self,
-        config_path: str,
-    )-> None:
-        
-        self._config = load_from_yaml(config_path)
-        
-        
-    async def _reload_config_async(
-        self,
-        config_path: str,
-    )-> str:
-
-        try:
-            new_config, new_config_content = await load_from_yaml_async(
-                file_path = config_path,
-            )
-            self._config = new_config
-            self._config_path = config_path
-            return new_config_content
-        except Exception as error:
-            return f"配置更新失败！\n错误信息:\n{str(error)}\n调用栈：\n{traceback.format_exc()}"
     
     
     async def _get_problem_no(
@@ -692,7 +663,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             response_text = (
                 f"🤖 **北大物院-费米子活动机器人**\n"
                 f"━━━━━━━━━━━━━━━━\n"
-                f"🆔 **Bot ID**: `{self._open_id}`\n"
+                f"🆔 **Bot ID**: `{self._config['open_id']}`\n"
                 f"🧠 **内核版本**: PkuPhyFermionBot v0.1.0\n"
                 f"🏫 **所属单位**: 北京大学物理学院\n"
                 f"✨ **Slogan**: 像费米子一样，虽独一无二，却共同构建物质世界。\n"

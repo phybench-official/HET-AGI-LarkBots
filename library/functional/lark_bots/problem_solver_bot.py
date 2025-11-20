@@ -36,18 +36,30 @@ class ProblemSolverBot(ParallelThreadLarkBot):
     
     def __init__(
         self, 
-        lark_bot_name: str,
+        config_path: str,
         worker_timeout: float = 600.0,
         context_cache_size: int = 1024,
         max_workers: Optional[int] = None,
     )-> None:
         
         super().__init__(
-            lark_bot_name = lark_bot_name,
+            config_path = config_path, 
             worker_timeout = worker_timeout,
             context_cache_size = context_cache_size,
             max_workers = max_workers,
         )
+        
+        # start 动作的逻辑是会在子进程中再跑一个机器人
+        # 这样可以暴露简洁的 API，把不同机器人隔离在不同进程中，防止底层库报错
+        # 这背后依赖属性 _init_arguments
+        # 所以子类如果签名改变，有义务自行维护 _init_arguments
+        # 另外，由于会被运行两次，所以 __init__ 方法应是轻量级且幂等的
+        self._init_arguments: Dict[str, Any] = {
+            "config_path": config_path,
+            "worker_timeout": worker_timeout,
+            "context_cache_size": context_cache_size,
+            "max_workers": max_workers,
+        }
         
         problem_solver_config = load_from_yaml(f"configs{seperator}problem_solver_config.yaml")
         self._association_tenant = problem_solver_config["association_tenant"]

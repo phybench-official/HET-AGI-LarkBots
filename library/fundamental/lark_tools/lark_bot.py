@@ -4,10 +4,10 @@ from ._lark_sdk import *
 from ..json_tools import *
 from ..backoff_decorators import *
 from ..image_tools import *
+from ..yaml_tools import *
 
 
 __all__ = [
-    "get_lark_bot_token",
     "get_lark_document_url",
     "LarkBot",
     "P2ImMessageReceiveV1",
@@ -67,22 +67,22 @@ class LarkBot:
     
     def __init__(
         self,
-        lark_bot_name: str,
+        config_path: str,
     )-> None:
         
         self._init_arguments: Dict[str, Any] = {
-            "lark_bot_name": lark_bot_name,
+            "config_path": config_path,
         }
         
-        app_id, app_secret, open_id = get_lark_bot_token(lark_bot_name)
-        self._name = lark_bot_name
-        self._app_id = app_id
-        self._app_secret = app_secret
-        self._open_id = open_id
+        self._load_config(config_path)
         
         lark_client_builder = lark.Client.builder()
-        lark_client_builder = lark_client_builder.app_id(app_id)
-        lark_client_builder = lark_client_builder.app_secret(app_secret)
+        lark_client_builder = lark_client_builder.app_id(
+            app_id = self._config["app_id"],
+        )
+        lark_client_builder = lark_client_builder.app_secret(
+            app_secret = self._config["app_secret"],
+        )
         lark_client_builder = lark_client_builder.log_level(lark.LogLevel.INFO)
         self._lark_client = lark_client_builder.build()
 
@@ -122,6 +122,31 @@ class LarkBot:
             re.DOTALL,
         )
     
+     
+    def _load_config(
+        self,
+        config_path: str,
+    )-> None:
+        
+        self._config = load_from_yaml(config_path)
+        self._config_path = config_path
+        
+        
+    async def _reload_config_async(
+        self,
+        config_path: str,
+    )-> str:
+
+        try:
+            new_config, new_config_content = await load_from_yaml_async(
+                file_path = config_path,
+            )
+            self._config = new_config
+            self._config_path = config_path
+            return new_config_content
+        except Exception as error:
+            return f"配置更新失败！\n错误信息:\n{str(error)}\n调用栈：\n{traceback.format_exc()}"
+    
     
     @staticmethod
     def _run_in_process(
@@ -154,15 +179,15 @@ class LarkBot:
         
         这是 LarkBot 原始的 start() 方法的内容。
         """
-        print(f"[LarkBot-{self._name}] Starting synchronous Lark WS client (blocking process)...")
+        print(f"[LarkBot-{self._config['name']}] Starting synchronous Lark WS client (blocking process)...")
         event_handler = self._event_handler_builder.build()
         lark.ws.Client(
-            app_id = self._app_id,
-            app_secret = self._app_secret,
+            app_id = self._config["app_id"],
+            app_secret = self._config["app_secret"],
             event_handler = event_handler,
             log_level = lark.LogLevel.DEBUG
         ).start()
-        print(f"[LarkBot-{self._name}] WS client shut down.")
+        print(f"[LarkBot-{self._config['name']}] WS client shut down.")
     
     
     def start(
@@ -194,7 +219,7 @@ class LarkBot:
             self._spawned_processes.append(proc)
         
         proc.start()
-        print(f"[Main] Started process {proc.pid} for {self._name}")
+        print(f"[Main] Started process {proc.pid} for {self._config['name']}")
 
         if block:
             print("[Main] All bot processes started. MainThread is waiting (Press Ctrl+C to exit).")
@@ -266,7 +291,7 @@ class LarkBot:
         except:
             mention_list = []
         mentioned_me = any(
-            mention.id.open_id == self._open_id
+            mention.id.open_id == self._config["open_id"]
             for mention in mention_list
             if mention.id is not None
         )

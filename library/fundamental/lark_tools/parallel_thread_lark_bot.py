@@ -13,16 +13,17 @@ class ParallelThreadLarkBot(LarkBot):
     
     def __init__(
         self,
-        lark_bot_name: str,
+        config_path: str,
         worker_timeout: float,
         context_cache_size: int,
         max_workers: Optional[int],
     )-> None:
 
-        super().__init__(lark_bot_name)
+        super().__init__(
+            config_path = config_path,
+        )
         
         self._init_arguments: Dict[str, Any] = {
-            "lark_bot_name": lark_bot_name,
             "worker_timeout": worker_timeout,
             "context_cache_size": context_cache_size,
             "max_workers": max_workers,
@@ -78,7 +79,7 @@ class ParallelThreadLarkBot(LarkBot):
         print(f"[ParallelThreadLarkBot] Async worker thread started.")
         
         super()._start_internal_logic()
-        print(f"[ParallelThreadLarkBot] {self._name} WS client shut down.")
+        print(f"[ParallelThreadLarkBot] {self._config['name']} WS client shut down.")
     
     
     def _sync_bridge_callback(
