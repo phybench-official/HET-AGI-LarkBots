@@ -248,16 +248,12 @@ class LarkBot:
         except:
             sender = None
         
-        if chat_type == "group":
-            if message.event.message.root_id:
-                thread_root_id = message.event.message.root_id
-                is_thread_root = False
-            else:
-                thread_root_id = message_id
-                is_thread_root = True
-        else:
-            thread_root_id = None
+        if message.event.message.root_id:
+            thread_root_id = message.event.message.root_id
             is_thread_root = False
+        else:
+            thread_root_id = message_id
+            is_thread_root = True
         
         try:
             message_content_dict = deserialize_json(message_content)

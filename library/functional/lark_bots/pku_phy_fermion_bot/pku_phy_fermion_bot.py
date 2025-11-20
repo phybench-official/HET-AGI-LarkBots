@@ -16,10 +16,10 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
     def __init__(
         self,
         lark_bot_name: str,
+        config_path: str,
         worker_timeout: float = 600.0,
         context_cache_size: int = 1024,
         max_workers: Optional[int] = None,
-        config_path: str = f"configs{seperator}pku_phy_fermion_config.yaml",
     )-> None:
 
         super().__init__(
@@ -28,6 +28,19 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             context_cache_size = context_cache_size,
             max_workers = max_workers,
         )
+        
+        # start 动作的逻辑是会在子进程中再跑一个机器人
+        # 这样可以把不同机器人隔离在不同进程中，防止底层库报错
+        # 这背后依赖属性 _init_arguments
+        # 所以子类如果签名改变，有义务自行维护 _init_arguments
+        # 另外，由于会被运行两次，所以 __init__ 方法应是轻量级且幂等的
+        self._init_arguments: Dict[str, Any] = {
+            "lark_bot_name": lark_bot_name,
+            "config_path": config_path,
+            "worker_timeout": worker_timeout,
+            "context_cache_size": context_cache_size,
+            "max_workers": max_workers,
+        }
         
         self._acceptance_cache_size: int = context_cache_size
         self._acceptance_cache: OrderedDict[str, bool] = OrderedDict()
@@ -110,6 +123,18 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
                 return True
         # 私聊消息，执行指令/返回教程
         else:
+            # 是顶层消息
+            if parsed_message["is_thread_root"]:
+                # @了机器人，需要处理
+                if parsed_message["mentioned_me"]:
+                    thread_root_id: Optional[str] = parsed_message["thread_root_id"]
+                    assert thread_root_id
+                    print(f"[PkuPhyFermionBot] Root message {parsed_message['message_id']} accepted, adding to acceptance cache.")
+                    self._acceptance_cache[thread_root_id] = True
+                    self._acceptance_cache.move_to_end(thread_root_id)
+                    if len(self._acceptance_cache) > self._acceptance_cache_size:
+                        evicted_key, _ = self._acceptance_cache.popitem(last=False)
+                        print(f"[PkuPhyFermionBot] Evicted {evicted_key} from acceptance cache.")
             return True
     
     
@@ -317,6 +342,44 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
                     sender_id = sender,
                 )
                 return context
+            # 私聊提交题目
+            elif mentioned_me:
+                # 是顶层消息
+                if is_thread_root:
+                    # 进入业务逻辑
+                    if context["is_accepted"]:
+                        assert context["owner"] is None
+                        context["owner"] = sender
+                        pass
+                    # 应该到不了这里
+                    else:
+                        raise RuntimeError
+                # 是话题内消息
+                else:
+                    # 顶层消息@了，鉴权后进入业务逻辑
+                    if context["is_accepted"]:
+                        if sender == context["owner"]:
+                            pass
+                        else:
+                            if mentioned_me:
+                                await self.reply_message_async(
+                                    response = "请在话题根消息@我以发起我和您的专属话题~",
+                                    message_id = message_id,
+                                    reply_in_thread = True,
+                                )
+                                return context
+                            else:
+                                return context
+                    # 顶层消息没有@，不进入业务逻辑
+                    # 如果这一条消息@了，提示要在顶层消息中@
+                    else:
+                        if mentioned_me:
+                            await self.reply_message_async(
+                                response = "请在在话题根消息@我以发起我和您的专属话题~",
+                                message_id = message_id,
+                                reply_in_thread = True,
+                            )
+                        return context
             # 发送教程
             else:
                 await self.reply_message_async(
@@ -684,12 +747,18 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             await self.reply_message_async("🔄 正在重新加载配置文件，请稍候...", message_id)
             result_content = await self._reload_config_async(self._config_path)
             
+            if len(result_content.splitlines()) > 100:
+                truncated_result_content = "\n".join(
+                    result_content.splitlines()[:100] + ["..."]
+                )
+            else:
+                truncated_result_content = result_content
             response_text = (
                 f"✅ **配置更新完成！**\n"
                 f"📂 **来源**: `{self._config_path}`\n"
                 f"📄 **当前内容摘要**:\n"
-                f"```yaml\n{result_content[:1000]}...\n```\n"
-                f"(完整内容已加载至内存)"
+                f"{truncated_result_content}\n"
+                f"(已加载至内存)"
             )
             await self.reply_message_async(response_text, message_id)
             return
