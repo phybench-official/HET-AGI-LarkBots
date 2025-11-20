@@ -1,0 +1,9 @@
+{
+    "Gemini-2.5-Pro": [
+        {
+            "api_key": "sk-your-token-here",
+            "base_url": "https://yunwu.ai/v1",
+            "model": "gemini-2.5-pro"
+        }
+    ],
+}

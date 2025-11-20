@@ -2,10 +2,12 @@ __pycache__
 .venv
 .DS_Store
 
+# Environment configuration files
 mcp_servers_config.json
 api_keys.json
 lark_api_keys.json
 wolfram_api_keys.json
+.env
 
 configs/
 logs/

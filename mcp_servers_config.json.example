@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "mathematica": {
+      "url": "http://mcpserver.com/mcp",
+      "auth_token": "your-auth-token-here",
+      "timeout": 60.0
+    }
+  }
+}
