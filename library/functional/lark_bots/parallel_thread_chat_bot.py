@@ -10,14 +10,14 @@ class ParallelThreadChatBot(ParallelThreadLarkBot):
 
     def __init__(
         self,
-        lark_bot_name: str,
+        config_path: str,
         worker_timeout: float = 600.0,
         context_cache_size: int = 1024,
         max_workers: Optional[int] = None,
     )-> None:
 
         super().__init__(
-            lark_bot_name = lark_bot_name,
+            config_path = config_path,
             worker_timeout = worker_timeout,
             context_cache_size = context_cache_size,
             max_workers = max_workers,

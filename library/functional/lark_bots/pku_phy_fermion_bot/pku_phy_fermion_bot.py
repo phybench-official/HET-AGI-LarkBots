@@ -1,6 +1,7 @@
 from ....fundamental import *
 from .equation_rendering import *
 from .problem_understanding import *
+from .workflows import *
 
 
 __all__ = [
@@ -54,14 +55,23 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         self._problem_id_to_context: Dict[int, Dict[str, Any]] = {}
 
         self._workflows: Dict[str, Callable[[Dict[str, Any]], Coroutine[Any, Any, Dict[str, Any]]]] = {
-            "default": self._workflow_default,
-            "deep_think": self._workflow_deep_think,
+            "Gemini-2.5-Pro": with_tools_func_factory("Gemini-2.5-Pro", self),
+            "GPT-5-Pro": with_tools_func_factory("GPT-5-Pro", self),
+            "Gemini-2.5-Pro": straight_forwarding_func_factory("Gemini-2.5-Pro", self),
+            "GPT-5-Pro": straight_forwarding_func_factory("GPT-5-Pro", self),
         }
         self._workflow_descriptions: Dict[str, str] = {
-            "default": "快速获取基础解答",
-            "deep_think": "启用慢思考模式，多角度分析",
+            "Gemini-2.5-Pro with tools": "允许 Gemini-2.5-Pro 调用 Python 和 Mathematica 解题",
+            "GPT-5-Pro with tools": "允许 GPT-5-Pro 调用 Python 和 Mathematica 解题",
+            "Gemini-2.5-Pro": "直接让 Gemini-2.5-Pro 解题",
+            "GPT-5-Pro": "直接让 GPT-5-Pro 解题",
         }
-        self._default_workflows: List[str] = ["default"]
+        self._default_workflows: List[str] = [
+            "Gemini-2.5-Pro with tools",
+            "GPT-5-Pro with tools",
+            "Gemini-2.5-Pro",
+            "GPT-5-Pro",
+        ]
     
     
     async def _get_problem_no(
