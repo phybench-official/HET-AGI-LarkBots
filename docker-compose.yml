@@ -8,7 +8,6 @@ services:
     volumes:
       - ./configs:/app/configs:rw
       - ./api_keys.json:/app/api_keys.json:ro
-      - ./lark_api_keys.json:/app/lark_api_keys.json:ro
       - ./mcp_servers_config.json:/app/mcp_servers_config.json:ro
 
     restart: unless-stopped

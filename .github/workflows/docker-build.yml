@@ -57,3 +57,21 @@ jobs:
           cache-to: type=gha,mode=max
           platforms: linux/amd64
           provenance: false
+
+      - name: Trigger deployment webhook
+        if: success()
+        run: |
+          curl -X POST \
+            -H "X-Webhook-Token: ${{ secrets.WEBHOOK_TOKEN }}" \
+            -H "X-GitHub-Event: workflow_run" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "repository": "${{ github.repository }}",
+              "ref": "${{ github.ref }}",
+              "commit": "${{ github.sha }}",
+              "actor": "${{ github.actor }}",
+              "workflow": "${{ github.workflow }}"
+            }' \
+            ${{ secrets.WEBHOOK_URL }}
+        continue-on-error: true
+
