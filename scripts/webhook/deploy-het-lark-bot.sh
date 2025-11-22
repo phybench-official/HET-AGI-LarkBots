@@ -61,6 +61,25 @@ fi
 
 log "Using image: $IMAGE_TO_USE"
 
+# 保存可用的镜像源到 .env 文件，供后续直接 docker compose up -d 使用
+ENV_FILE="$PROJECT_DIR/.env"
+if [ -f "$ENV_FILE" ]; then
+    # 如果 .env 文件存在，更新或添加 DOCKER_IMAGE
+    if grep -q "^DOCKER_IMAGE=" "$ENV_FILE"; then
+        # 更新现有的 DOCKER_IMAGE
+        sed -i "s|^DOCKER_IMAGE=.*|DOCKER_IMAGE=$IMAGE_TO_USE|" "$ENV_FILE"
+        log "Updated DOCKER_IMAGE in .env file"
+    else
+        # 添加新的 DOCKER_IMAGE
+        echo "DOCKER_IMAGE=$IMAGE_TO_USE" >> "$ENV_FILE"
+        log "Added DOCKER_IMAGE to .env file"
+    fi
+else
+    # 如果 .env 文件不存在，创建它
+    echo "DOCKER_IMAGE=$IMAGE_TO_USE" > "$ENV_FILE"
+    log "Created .env file with DOCKER_IMAGE"
+fi
+
 # 重新启动容器
 log "Restarting containers with docker compose up -d..."
 if DOCKER_IMAGE="$IMAGE_TO_USE" docker compose up -d 2>&1 | tee -a "$LOG_FILE"; then
