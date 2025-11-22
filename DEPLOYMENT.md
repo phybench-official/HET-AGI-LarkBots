@@ -78,7 +78,6 @@ git push origin v1.0.0
 |------|--------|------|
 | `.env` | ❌ | Supabase 数据库配置 |
 | `api_keys.json` | ❌ | AI 模型 API 密钥 |
-| `lark_api_keys.json` | ❌ | 飞书机器人凭证 |
 | `mcp_servers_config.json` | ❌ | MCP 服务器配置 |
 | `configs/*.yaml` | ✅ | 机器人业务配置 |
 
