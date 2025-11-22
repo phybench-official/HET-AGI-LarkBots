@@ -1,0 +1,24 @@
+[
+  {
+    "id": "deploy-het-lark-bot",
+    "execute-command": "/data/hetbench/webhook/deploy-het-lark-bot.sh",
+    "command-working-directory": "/data/hetbench/dock/stacks/lark-bot",
+    "response-message": "Deployment triggered successfully",
+    "pass-arguments-to-command": [
+      {
+        "source": "header",
+        "name": "X-GitHub-Event"
+      }
+    ],
+    "trigger-rule": {
+      "match": {
+        "type": "value",
+        "value": "aaaf69996d70b42c01289ef9ea6b535c81b5a4e9d7867c45da592291ac2e676c",
+        "parameter": {
+          "source": "header",
+          "name": "X-Webhook-Token"
+        }
+      }
+    }
+  }
+]

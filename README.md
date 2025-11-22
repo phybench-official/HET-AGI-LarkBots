@@ -155,8 +155,3 @@ workflows:
 - **AI 集成**：openai (兼容多模型)
 - **数据库**：supabase
 - **依赖管理**：uv
-
-## 许可证
-
-MIT
-

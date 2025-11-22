@@ -1,7 +1,8 @@
 services:
   lark-bot:
-    image: wjsoj/het-lark-bot:latest
+    image: ${DOCKER_IMAGE:-ghcr.io/phybench-official/het-lark-bot:latest}
     container_name: het-lark-bot
+    pull_policy: always
 
     env_file: .env
 
