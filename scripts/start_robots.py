@@ -1,31 +1,37 @@
+# scripts/start_robot_history/start_robots_251122_1000.py
 from library import *
 
 
 def main():
     
-    # problem_solver = ProblemSolverBot(
-    #     config_path = f"configs/problem_solver_config.yaml",
-    # )
-    # problem_solver.start()
-    
-    # PKU_PHY_fermion_for_testing = PkuPhyFermionBot(
-    #     config_path = f"configs/pku_phy_fermion_config_for_testing.yaml",
-    # )
-    # PKU_PHY_fermion_for_testing.start()
-    
-    PKU_PHY_fermion = PkuPhyFermionBot(
-        config_path = f"configs/pku_phy_fermion_config_251120_0900.yaml",
+    PKU_PHY_fermion1 = PkuPhyFermionBot(
+        config_path = f"configs/pku_phy_fermion_configs_251122_1200/fermion1.yaml",
     )
-    PKU_PHY_fermion.start(block=True)
+    PKU_PHY_fermion1.start()
+    
+    PKU_PHY_fermion2 = PkuPhyFermionBot(
+        config_path = f"configs/pku_phy_fermion_configs_251122_1200/fermion2.yaml",
+    )
+    PKU_PHY_fermion2.start()
+    
+    PKU_PHY_fermion3 = PkuPhyFermionBot(
+        config_path = f"configs/pku_phy_fermion_configs_251122_1200/fermion3.yaml",
+    )
+    PKU_PHY_fermion3.start()
+    
+    PKU_PHY_fermion4 = PkuPhyFermionBot(
+        config_path = f"configs/pku_phy_fermion_configs_251122_1200/fermion4.yaml",
+    )
+    PKU_PHY_fermion4.start()
+    
+    PKU_PHY_fermion5 = PkuPhyFermionBot(
+        config_path = f"configs/pku_phy_fermion_configs_251122_1200/fermion5.yaml",
+    )
+    PKU_PHY_fermion5.start(block=True)
     
     print("[Main] MainThread exiting.")
 
 
 if __name__ == "__main__":
-
-    try:
-        multiprocessing.set_start_method("spawn")
-    except RuntimeError:
-        pass
     
     main()
