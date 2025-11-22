@@ -54,23 +54,26 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         self._next_problem_no_lock = asyncio.Lock()
         self._problem_id_to_context: Dict[int, Dict[str, Any]] = {}
 
-        self._workflows: Dict[str, Callable[[Dict[str, Any]], Coroutine[Any, Any, Dict[str, Any]]]] = {
-            "Gemini-2.5-Pro with tools": with_tools_func_factory("Gemini-2.5-Pro", self),
-            "GPT-5-Pro with tools": with_tools_func_factory("GPT-5-Pro", self),
-            "Gemini-2.5-Pro": straight_forwarding_func_factory("Gemini-2.5-Pro", self),
-            "GPT-5-Pro": straight_forwarding_func_factory("GPT-5-Pro", self),
-        }
+        self._workflows: List[str] = [
+            "Gemini-2.5-Pro with tools",
+            "GPT-5-Pro with tools",
+            "Gemini-2.5-Pro",
+            "GPT-5-Pro",
+        ]
         self._workflow_descriptions: Dict[str, str] = {
             "Gemini-2.5-Pro with tools": "允许 Gemini-2.5-Pro 调用 Python 和 Mathematica 解题",
             "GPT-5-Pro with tools": "允许 GPT-5-Pro 调用 Python 和 Mathematica 解题",
             "Gemini-2.5-Pro": "直接让 Gemini-2.5-Pro 解题",
             "GPT-5-Pro": "直接让 GPT-5-Pro 解题",
         }
+        self._workflow_implementations: Dict[str, Callable[[Dict[str, Any]], Coroutine[Any, Any, Dict[str, Any]]]] = {
+            "Gemini-2.5-Pro with tools": with_tools_func_factory("Gemini-2.5-Pro", self),
+            "GPT-5-Pro with tools": with_tools_func_factory("GPT-5-Pro", self),
+            "Gemini-2.5-Pro": straight_forwarding_func_factory("Gemini-2.5-Pro", self),
+            "GPT-5-Pro": straight_forwarding_func_factory("GPT-5-Pro", self),
+        }
         self._default_workflows: List[str] = [
             "Gemini-2.5-Pro with tools",
-            "GPT-5-Pro with tools",
-            "Gemini-2.5-Pro",
-            "GPT-5-Pro",
         ]
     
     
@@ -409,7 +412,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             index = int(text)
             if index in mapping:
                 target_workflow = mapping[index]
-        elif text in self._workflows:
+        elif text in self._workflow_implementations:
             target_workflow = text
             
         async with context["lock"]:
@@ -442,13 +445,10 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
 
         lines = []
         mapping = {}
-        sorted_keys = sorted(self._workflows.keys())
-        
-        for idx, key in enumerate(sorted_keys, 1):
-            desc = self._workflow_descriptions[key] # key error if missing, fast fail
-            lines.append(f"{idx}. [{key}] {desc}")
-            mapping[idx] = key
-            
+        for workflow_no, workflow in enumerate(self._workflows, 1):
+            workflow_description = self._workflow_descriptions[workflow]
+            lines.append(f"{workflow_no}. [{workflow}] {workflow_description}")
+            mapping[workflow_no] = workflow
         return "\n".join(lines), mapping
 
 
@@ -494,7 +494,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         reply_message_id: str,
     ) -> None:
 
-        workflow_func = self._workflows[workflow_name]
+        workflow_func = self._workflow_implementations[workflow_name]
         start_time = get_time_stamp()
         
         # 1. 仅更新计数器，不操作 trials 列表 (不占位)
