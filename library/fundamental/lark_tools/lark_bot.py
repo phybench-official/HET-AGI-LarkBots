@@ -246,6 +246,14 @@ class LarkBot:
     )-> None:
         
         self._event_handler_builder.register_p2_im_message_receive_v1(handler)
+        
+        
+    def register_user_created(
+        self,
+        handler: Callable[[P2ContactUserCreatedV3], None],
+    )-> None:
+        
+        self._event_handler_builder.register_p2_contact_user_created_v3(handler)
     
     
     def parse_message(
@@ -1331,3 +1339,29 @@ class LarkBot:
             raise RuntimeError
         else:
             return None
+        
+        
+    async def add_members_to_chat_async(
+        self,
+        chat_id: str,
+        member_ids: List[str],
+        member_id_type: Literal["user_id", "open_id", "union_id"] = "user_id",
+    )-> None:
+        
+        request_body_builder = CreateChatMembersRequestBody.builder()
+        request_body_builder = request_body_builder.id_list(member_ids)
+        request_body = request_body_builder.build()
+
+        request_builder = CreateChatMembersRequest.builder()
+        request_builder = request_builder.chat_id(chat_id)
+        request_builder = request_builder.member_id_type(member_id_type)
+        request_builder = request_builder.request_body(request_body)
+        request = request_builder.build()
+
+        assert self._lark_client.im
+        response = await self._lark_client.im.v1.chat_members.acreate(request)
+        
+        if response.success():
+            return None
+        else:
+            raise RuntimeError(f"[LarkBot] 异步拉人入群失败: {response.code} {response.msg} | chat_id: {chat_id}")

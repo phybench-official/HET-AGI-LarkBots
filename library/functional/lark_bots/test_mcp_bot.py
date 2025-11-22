@@ -74,7 +74,7 @@ class TestMCPBot(ParallelThreadLarkBot):
 
     def __init__(
         self,
-        lark_bot_name: str,
+        config_path: str,
         model_name: str = "GPT-5",
         mcp_server_name: str = "mathematica",
         mcp_config_path: str = "mcp_servers_config.json",
@@ -85,7 +85,7 @@ class TestMCPBot(ParallelThreadLarkBot):
     )-> None:
 
         super().__init__(
-            lark_bot_name = lark_bot_name,
+            config_path = config_path,
             worker_timeout = worker_timeout,
             context_cache_size = context_cache_size,
             max_workers = max_workers,

@@ -10,14 +10,14 @@ class LarkDocumentTestBot(ParallelThreadLarkBot):
 
     def __init__(
         self,
-        lark_bot_name: str,
+        config_path: str,
         worker_timeout: float = 600.0,
         context_cache_size: int = 1024,
         max_workers: Optional[int] = None,
     )-> None:
 
         super().__init__(
-            lark_bot_name = lark_bot_name,
+            config_path = config_path,
             worker_timeout = worker_timeout,
             context_cache_size = context_cache_size,
             max_workers = max_workers,
@@ -26,7 +26,7 @@ class LarkDocumentTestBot(ParallelThreadLarkBot):
         self._acceptance_cache_size: int = context_cache_size
         self._acceptance_cache: OrderedDict[str, bool] = OrderedDict()
         
-        self._mention_me_text = f"@{self._name}"
+        self._mention_me_text = f"@{self._config['name']}"
         
         lark_document_tester_config = load_from_yaml("configs/lark_document_tester_config.yaml")
         self._PKU_alumni_association = lark_document_tester_config["PKU_alumni_association"]

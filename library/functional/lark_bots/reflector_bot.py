@@ -12,15 +12,15 @@ class ReflectorBot(LarkBot):
     
     def __init__(
         self, 
-        lark_bot_name: str
+        config_path: str,
     )-> None:
         
         super().__init__(
-            lark_bot_name = lark_bot_name,
+            config_path = config_path,
         )
         
         self.register_message_receive(self.handle_message_receive)
-        self._mention_me_text = f"@{self._name}"
+        self._mention_me_text = f"@{self._config['name']}"
     
     
     def handle_message_receive(

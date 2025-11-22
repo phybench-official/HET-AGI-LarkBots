@@ -2,6 +2,7 @@ from ....fundamental import *
 from .equation_rendering import *
 from .problem_understanding import *
 from .workflows import *
+from ....fundamental.lark_tools._lark_sdk import P2ContactUserCreatedV3
 
 
 __all__ = [
@@ -75,6 +76,8 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         self._default_workflows: List[str] = [
             "Gemini-2.5-Pro with tools",
         ]
+        
+        self.register_user_created(self._handle_user_created_bridge)
     
     
     async def _get_problem_no(
@@ -609,6 +612,46 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         return {
             "document_content": f"这是深度思考工作流生成的详细解析 (Mock)。\n包含公式：{self.begin_of_equation}E=mc^2{self.end_of_equation}",
         }
+        
+    
+    def _handle_user_created_bridge(
+        self,
+        event: P2ContactUserCreatedV3,
+    )-> None:
+
+        assert self._async_loop is not None
+        asyncio.run_coroutine_threadsafe(
+            self._handle_user_created_async(event),
+            self._async_loop,
+        )
+    
+    
+    async def _handle_user_created_async(
+        self,
+        event: P2ContactUserCreatedV3,
+    )-> None:
+        
+        try:
+            assert event.event is not None
+            assert event.event.object is not None
+            user_id = event.event.object.user_id
+            target_chat_id = self._config["user_group_chat_id"]
+            if not user_id or not target_chat_id: return
+
+            print(f"[PkuPhyFermionBot] Async detected user joined: {user_id}")
+            await self.add_members_to_chat_async(
+                chat_id = target_chat_id,
+                member_ids = [user_id],
+                member_id_type = "user_id",
+            )
+            print(f"[PkuPhyFermionBot] Async successfully added {user_id} to {target_chat_id}")
+            await self.send_message_async(
+                receive_id_type = "user_id",
+                receive_id = user_id,
+                content = "欢迎您使用 HET-AGI 题目测试平台！已将您拉至 HET-AGI 交流群，机器人的更新维护通知将在群里推送；您也可以随时@志愿者以反馈问题。\n在群聊或私聊中@北大物院-费米子并输入题目，均可开启解题话题、自动调用接入 Mathematica 的 AI 工作流；祝使用愉快！~",
+            )
+        except Exception as error:
+            print(f"[PkuPhyFermionBot] Error in async user creation handler: {error}\n{traceback.format_exc()}")
 
     
     async def _execute_command(

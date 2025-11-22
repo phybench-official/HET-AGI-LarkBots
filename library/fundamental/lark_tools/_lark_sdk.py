@@ -11,6 +11,8 @@ from lark_oapi.api.im.v1 import CreateMessageRequestBody
 from lark_oapi.api.im.v1 import CreateImageRequest
 from lark_oapi.api.im.v1 import CreateImageResponse
 from lark_oapi.api.im.v1 import CreateImageRequestBody
+from lark_oapi.api.im.v1 import CreateChatMembersRequest
+from lark_oapi.api.im.v1 import CreateChatMembersRequestBody
 from lark_oapi.api.drive.v1 import DeleteFileRequest
 from lark_oapi.api.drive.v1 import DeleteFileResponse
 from lark_oapi.api.drive.v1 import UploadAllMediaRequest
@@ -38,6 +40,7 @@ from lark_oapi.api.docx.v1 import CreateDocumentBlockChildrenRequestBody
 from lark_oapi.api.docx.v1 import BatchDeleteDocumentBlockChildrenRequest
 from lark_oapi.api.docx.v1 import BatchDeleteDocumentBlockChildrenResponse
 from lark_oapi.api.docx.v1 import BatchDeleteDocumentBlockChildrenRequestBody
+from lark_oapi.api.contact.v3 import P2ContactUserCreatedV3
 
 
 __all__ = [
@@ -53,6 +56,8 @@ __all__ = [
     "CreateImageRequest",
     "CreateImageResponse",
     "CreateImageRequestBody",
+    "CreateChatMembersRequest",
+    "CreateChatMembersRequestBody",
     "DeleteFileRequest",
     "DeleteFileResponse",
     "UploadAllMediaRequest",
@@ -81,4 +86,5 @@ __all__ = [
     "BatchDeleteDocumentBlockChildrenRequest",
     "BatchDeleteDocumentBlockChildrenResponse",
     "BatchDeleteDocumentBlockChildrenRequestBody",
+    "P2ContactUserCreatedV3",
 ]
