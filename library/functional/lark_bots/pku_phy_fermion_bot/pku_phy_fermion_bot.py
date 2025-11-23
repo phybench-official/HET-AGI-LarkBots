@@ -495,7 +495,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         
         tutorial_text = (
             "您好，这里是北大物院费米子 Bot。\n"
-            "使用说明：\n"
+            f"{self.begin_of_bold}使用说明{self.end_of_bold}：\n"
             f"{self.begin_of_bold}1. 发起解题话题{self.end_of_bold}：请 @ 我并发送题目；题目可以带图片。\n"
             f"{self.begin_of_bold}2. 多次尝试不同工作流{self.end_of_bold}：话题建立后，可按提示调用 AI 工作流多次解题。\n"
             f"{self.begin_of_bold}3. 指令系统{self.end_of_bold}：以 '/' 开头的私聊消息会被解读为指令；输入 /help 可查看可用指令。\n"
