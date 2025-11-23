@@ -1,3 +1,4 @@
+import ast
 from openai import OpenAI, AsyncOpenAI
 from threading import Lock
 import aiofiles.os as aiofiles_os
@@ -20,6 +21,43 @@ __all__ = [
     # "get_available_models",
     # "get_available_models_async",
 ]
+
+
+def _repair_tool_arguments(arg_str: str) -> str:
+    """
+    尝试修复模型生成的非标准 JSON 字符串（如包含 Markdown 或 Python 单引号格式）。
+    """
+    if not isinstance(arg_str, str):
+        return arg_str
+        
+    cleaned_str = arg_str.strip()
+    
+    # 1. 去除 Markdown 代码块标记 (```json ... ```)
+    # 很多模型喜欢画蛇添足加这个
+    if "```" in cleaned_str:
+        pattern = r"```(?:json)?\s*(.*?)\s*```"
+        match = re.search(pattern, cleaned_str, re.DOTALL | re.IGNORECASE)
+        if match:
+            cleaned_str = match.group(1)
+            
+    # 2. 尝试标准解析
+    try:
+        json_obj = json.loads(cleaned_str)
+        return json.dumps(json_obj, ensure_ascii=False)
+    except json.JSONDecodeError:
+        pass
+        
+    # 3. 尝试作为 Python 字面量解析 (处理单引号问题: {'a': 1})
+    # Qwen 等模型常犯此错
+    try:
+        # ast.literal_eval 只能解析基础数据结构，比较安全
+        py_obj = ast.literal_eval(cleaned_str)
+        return json.dumps(py_obj, ensure_ascii=False)
+    except (ValueError, SyntaxError):
+        pass
+        
+    # 4. 无法修复，原样返回，等待后续报错或运气
+    return arg_str
 
 
 translate = lambda text: text
@@ -415,8 +453,8 @@ async def _get_answer_raw_async(
     tool_use_trial_num: int,
 )-> str:
     
-    if base_url in ["https://yunwu.ai/v1"]:
-        await asyncio.sleep(random.uniform(3.0, 5.0))
+    if any(keyword in base_url for keyword in ["yunwu"]):
+        await asyncio.sleep(random.uniform(5.0, 10.0))
 
     if isinstance(prompt, str):
         prompt_list = [prompt]
@@ -521,18 +559,24 @@ async def _get_answer_raw_async(
         )
         if isinstance(response, str): return response
         response_message = response.choices[0].message
-        finish_reason = response.choices[0].finish_reason
         if response_message.content:
             full_response_content += response_message.content
         messages.append(response_message)
-        if finish_reason == "stop":
+        
+        try:
+            has_tool_call = len(response_message.tool_calls) > 0 # type: ignore
+        except:
+            has_tool_call = False
+        
+        if not has_tool_call:
             return full_response_content
-        elif finish_reason == "tool_calls":
+        else:
             assert response_message.tool_calls is not None
             for tool_call in response_message.tool_calls:
                 assert isinstance(tool_call, ChatCompletionMessageFunctionToolCall)
                 function_name = tool_call.function.name
                 function_args_str = tool_call.function.arguments
+                function_args_str = _repair_tool_arguments(function_args_str)
                 if function_name not in tool_registry:
                     raise NameError(
                         translate(
@@ -569,19 +613,8 @@ async def _get_answer_raw_async(
                     "content": function_response_str,
                 })
             continue
-            
-        else:
-            raise RuntimeError(
-                translate(
-                    "模型因意外原因停止: %s"
-                ) % (finish_reason)
-            )
 
-    raise RuntimeError(
-        translate(
-            "超过最大工具调用次数 (%d)！"
-        ) % (tool_use_trial_num)
-    )
+    return full_response_content + f"\n最大工具调用次数 {tool_use_trial_num} 已达到，至此截断。"
 
 
 class ModelManager:
