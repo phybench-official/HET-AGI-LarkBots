@@ -10,6 +10,9 @@ __all__ = [
 ]
 
 
+_launch_time_stamp = get_time_stamp(show_minute=True, show_second=True)
+
+
 class PkuPhyFermionBot(ParallelThreadLarkBot):
 
     def __init__(
@@ -530,18 +533,14 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         workflow_func = self._workflow_implementations[workflow_name]
         start_time = get_time_stamp()
         
-        # 1. 仅更新计数器，不操作 trials 列表 (不占位)
         async with context["lock"]:
             context["running_workflows"] += 1
 
         try:
-            # 2. 耗时操作，无锁运行
             workflow_result = await workflow_func(context)
-            
             assert isinstance(workflow_result, dict), f"Workflow {workflow_name} must return a dict"
             assert "document_content" in workflow_result, f"Workflow {workflow_name} missing 'document_content'"
-
-            # 3. 拿锁，一气呵成：写入结果 -> 追加文档 -> 更新计数器
+            
             async with context["lock"]:
                 trial_record = {
                     "workflow": workflow_name,
@@ -551,8 +550,6 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
                     **workflow_result,
                 }
                 context["trials"].append(trial_record)
-                
-                # 追加刚写入的这条 (index = -1)
                 await self._push_latest_trial_to_document(context)
                 
                 context["running_workflows"] -= 1
@@ -569,20 +566,17 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
 
         except Exception as error:
             print(f"[PkuPhyFermionBot] Workflow {workflow_name} failed: {error}\n{traceback.format_exc()}")
-            
-            # 失败也要拿锁记录并在最后减计数
             async with context["lock"]:
                 context["trials"].append({
-                "workflow": workflow_name,
-                "status": "failed",
-                "start_time": start_time,
-                "end_time": get_time_stamp(),
-                "error": str(error),
-            })
+                    "workflow": workflow_name,
+                    "status": "failed",
+                    "start_time": start_time,
+                    "end_time": get_time_stamp(),
+                    "error": str(error),
+                })
                 context["running_workflows"] -= 1
-            
             await self.reply_message_async(
-                response = f"[{workflow_name}] 工作流执行出错: {str(error)}\n您可以联系志愿者以排查问题。",
+                response = f"[{workflow_name}] 非常抱歉，工作流执行出错: {str(error)}\n您可以联系志愿者以排查问题。",
                 message_id = reply_message_id,
                 reply_in_thread = True,
             )
@@ -683,7 +677,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
                 f"[系统信息]\n"
                 f"机器人ID: {self._config['open_id']}\n"
                 f"所属单位: 北京大学物理学院\n"
-                f"最近更新时间：2025/11/20 - 17:16\n"
+                f"最近更新时间：{_launch_time_stamp}\n"
             )
             await self.reply_message_async(response_text, message_id)
             return
