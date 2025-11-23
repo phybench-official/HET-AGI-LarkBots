@@ -392,11 +392,9 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         )
         context["document_block_num"] = len(blocks)
 
-        # 启动默认工作流
         for workflow_name in self._default_workflows:
             asyncio.create_task(self._run_workflow(context, workflow_name, message_id))
         
-        # 构建菜单和响应
         workflow_menu, _ = self._get_workflow_menu_and_mapping()
         response_text = (
             f"您的题目已整理进文档 {self.begin_of_hyperlink}{document_title}{self.end_of_hyperlink}\n"

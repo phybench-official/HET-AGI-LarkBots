@@ -70,6 +70,7 @@ def with_tools_func_factory(
         async def hijacked_python_tool_implementation(
             **kwargs,
         )-> str:
+            nonlocal tool_use_trials
             result = await original_python_tool["implementation"](**kwargs)
             tool_use_trials.append({
                 "name": "Python",
@@ -80,9 +81,10 @@ def with_tools_func_factory(
         async def hijacked_mathematica_tool_implementation(
             **kwargs,
         )-> str:
-            result = await original_python_tool["implementation"](**kwargs)
+            nonlocal tool_use_trials
+            result = await original_mathematica_tool["implementation"](**kwargs)
             tool_use_trials.append({
-                "name": "Python",
+                "name": "Mathematica",
                 "input": f"{lark_bot.begin_of_code}{lark_bot.begin_of_language}Plain Text{lark_bot.end_of_language}{lark_bot.begin_of_content}{kwargs['code']}{lark_bot.end_of_content}{lark_bot.end_of_code}",
                 "output": f"{lark_bot.begin_of_code}{lark_bot.begin_of_language}Plain Text{lark_bot.end_of_language}{lark_bot.begin_of_content}{result}{lark_bot.end_of_content}{lark_bot.end_of_code}",
             })
@@ -152,8 +154,9 @@ def with_tools_func_factory(
                 document_content += tool_use_trial["output"]
         
         return {
-            "document_content": response,
+            "document_content": document_content,
             "raw_response": raw_response,
+            "response": response,
             "tool_use_trials": tool_use_trials,
         }
     
