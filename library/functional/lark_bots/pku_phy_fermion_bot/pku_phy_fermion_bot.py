@@ -455,7 +455,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         if target_workflow:
             asyncio.create_task(self._run_workflow(context, target_workflow, message_id))
             await self.reply_message_async(
-                response = f"收到。已启动 [{target_workflow}] 工作流。\n当前有 {running_workflows + 1} 个工作流正在运行。",
+                response = f"收到。已启动 {self.begin_of_bold}[{target_workflow}]{self.end_of_bold} 工作流。\n当前有 {running_workflows + 1} 个工作流正在运行。",
                 message_id = message_id,
                 reply_in_thread = True,
             )
