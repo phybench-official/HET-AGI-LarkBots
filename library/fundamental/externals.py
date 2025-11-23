@@ -16,6 +16,7 @@ import multiprocessing
 from time import sleep
 from copy import deepcopy
 from functools import wraps
+from datetime import datetime
 from functools import partial
 from random import normalvariate
 from os.path import sep as seperator
@@ -43,6 +44,7 @@ __all__ = [
     "logging",
     "deepcopy",
     "asyncio",
+    "datetime",
     "binascii",
     "aiofiles",
     "traceback",

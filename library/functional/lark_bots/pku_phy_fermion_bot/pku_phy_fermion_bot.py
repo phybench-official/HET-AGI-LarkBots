@@ -10,7 +10,7 @@ __all__ = [
 ]
 
 
-_launch_time_stamp = get_time_stamp(show_minute=True, show_second=True)
+_launch_time_stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 class PkuPhyFermionBot(ParallelThreadLarkBot):
