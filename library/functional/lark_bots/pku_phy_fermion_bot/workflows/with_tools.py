@@ -75,7 +75,7 @@ def with_tools_func_factory(
             tool_use_trials.append({
                 "name": "Python",
                 "input": f"{lark_bot.begin_of_code}{lark_bot.begin_of_language}Python{lark_bot.end_of_language}{lark_bot.begin_of_content}{kwargs['code']}{lark_bot.end_of_content}{lark_bot.end_of_code}",
-                "output": f"{lark_bot.begin_of_code}{lark_bot.begin_of_language}Python{lark_bot.end_of_language}{lark_bot.begin_of_content}{result}{lark_bot.end_of_content}{lark_bot.end_of_code}",
+                "output": f"{lark_bot.begin_of_code}{lark_bot.begin_of_language}Python{lark_bot.end_of_language}{lark_bot.begin_of_content}{result.strip()}{lark_bot.end_of_content}{lark_bot.end_of_code}",
             })
             return result
         async def hijacked_mathematica_tool_implementation(
