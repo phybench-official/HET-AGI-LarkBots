@@ -23,6 +23,11 @@ system_prompt_for_physics_problems = """
     - Susyno
     - LieART
     - SARAH
+    - HPL
+    - PolyLogTools
+    - xAct
+    - GR
+    - LiteRed2
 对于涉及高能物理的计算密集型推理步骤（如：计算费曼积分），或求导、解微分方程这类适合用 Mathematica 来做的推理步骤，我们强烈建议你调用 Mathematica 工具进行解答；对于其余计算密集型推理步骤，你可以使用更轻量级的 Python 工具来解答，numpy、scipy 等库也已为你安装好。
 """
 
@@ -84,7 +89,7 @@ def with_tools_func_factory(
             return result
         hijacked_python_tool["implementation"] = hijacked_python_tool_implementation
         hijacked_mathematica_tool["implementation"] = hijacked_mathematica_tool_implementation
-        
+
         raw_response = await get_answer_async(
             prompt = problem_text,
             model = lark_bot._config["workflows"]["with_tools"][model]["model"],
