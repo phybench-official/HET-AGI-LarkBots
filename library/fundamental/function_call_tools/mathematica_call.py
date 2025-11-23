@@ -93,7 +93,8 @@ class MathematicaMCPManager:
         try:
             result = await self.mcp_client.call_tool(
                 "evaluate_mathematica",
-                {"code": code}
+                {"code": code, "timeout_seconds": timeout},
+                timeout=timeout + 5  # 客户端超时略大于服务器端超时，留出缓冲时间
             )
             output = self.mcp_client.parse_response(result)
             return output
