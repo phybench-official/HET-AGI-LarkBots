@@ -40,8 +40,8 @@ class LarkBot:
     
     language_text_style = {
         "Plain Text": 1,
-        "Python": 9,
         "JSON": 28,
+        "Python": 49,
     }
     
     image_placeholder = f"<image_{never_used_string}>"
