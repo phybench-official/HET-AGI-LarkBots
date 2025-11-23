@@ -414,6 +414,9 @@ async def _get_answer_raw_async(
     tools: List[Dict[str, Any]],
     tool_use_trial_num: int,
 )-> str:
+    
+    if base_url in ["https://yunwu.ai/v1"]:
+        await asyncio.sleep(random.uniform(3.0, 5.0))
 
     if isinstance(prompt, str):
         prompt_list = [prompt]
