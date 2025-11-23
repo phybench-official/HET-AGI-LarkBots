@@ -31,8 +31,17 @@ class LarkBot:
     first_heading_block_type = 3
     second_heading_block_type = 4
     third_heading_block_type = 5
+    forth_heading_block_type = 6
+    fifth_heading_block_type = 7
+    list_block_type = 12
+    code_block_type = 14
     divider_block_type = 22
     image_block_type = 27
+    
+    language_text_style = {
+        "Plain Text": 0,
+        "Python": 9,
+    }
     
     image_placeholder = f"<image_{never_used_string}>"
     divider_placeholder = f"<divider_{never_used_string}>"
@@ -40,12 +49,74 @@ class LarkBot:
     end_of_hyperlink = f"</hyperlink_{never_used_string}>"
     begin_of_equation = f"<equation_{never_used_string}>"
     end_of_equation = f"</equation_{never_used_string}>"
+    begin_of_bold = f"<bold_{never_used_string}>"
+    end_of_bold = f"</bold_{never_used_string}>"
     begin_of_first_heading = f"<first_heading_{never_used_string}>"
     end_of_first_heading = f"</first_heading_{never_used_string}>"
     begin_of_second_heading = f"<second_heading_{never_used_string}>"
     end_of_second_heading = f"</second_heading_{never_used_string}>"
     begin_of_third_heading = f"<third_heading_{never_used_string}>"
     end_of_third_heading = f"</third_heading_{never_used_string}>"
+    begin_of_forth_heading = f"<forth_heading_{never_used_string}>"
+    end_of_forth_heading = f"</forth_heading_{never_used_string}>"
+    begin_of_fifth_heading = f"<fifth_heading_{never_used_string}>"
+    end_of_fifth_heading = f"</fifth_heading_{never_used_string}>"
+    begin_of_code = f"<code_{never_used_string}>"
+    end_of_code = f"</code_{never_used_string}>"
+    begin_of_language = f"<language_{never_used_string}>"
+    end_of_language = f"</language_{never_used_string}>"
+    begin_of_content = f"<content_{never_used_string}>"
+    end_of_content = f"</content_{never_used_string}>"
+    
+    document_blocks_pattern = re.compile(
+        # image
+        f"({re.escape(image_placeholder)})|"
+        # divider
+        f"({re.escape(divider_placeholder)})|"
+        # first heading
+        f"({re.escape(begin_of_first_heading)}"
+        f".*?"
+        f"{re.escape(end_of_first_heading)})|"
+        # second heading
+        f"({re.escape(begin_of_second_heading)}"
+        f".*?"
+        f"{re.escape(end_of_second_heading)})|"
+        # third heading
+        f"({re.escape(begin_of_third_heading)}"
+        f".*?"
+        f"{re.escape(end_of_third_heading)})|"
+        # forth heading
+        f"({re.escape(begin_of_forth_heading)}"
+        f".*?"
+        f"{re.escape(end_of_forth_heading)})|"
+        # fifth heading
+        f"({re.escape(begin_of_fifth_heading)}"
+        f".*?"
+        f"{re.escape(end_of_fifth_heading)})|"
+        # code
+        f"({re.escape(begin_of_code)}"
+        f".*?"
+        f"{re.escape(end_of_code)})",
+        re.DOTALL,
+    )
+    text_elements_pattern = re.compile(
+        # equation
+        f"({re.escape(begin_of_equation)}"
+        f".*?"
+        f"{re.escape(end_of_equation)})|"
+        # bold
+        f"({re.escape(begin_of_bold)}"
+        f".*?"
+        f"{re.escape(end_of_bold)})",
+        re.DOTALL,
+    )
+    code_pattern = re.compile(
+        r"\s*"
+        rf"{re.escape(begin_of_language)}([\s\S]*){re.escape(end_of_language)}"
+        r"\s*"
+        rf"{re.escape(begin_of_content)}([\s\S]*){re.escape(end_of_content)}"
+        r"\s*"
+    )
     
     create_document_backoff_seconds = [1.0] * 32 + [2.0] * 32 + [4.0] * 32 + [8.0] * 32
     overwrite_document_backoff_seconds = [1.0] * 32 + [2.0] * 32 + [4.0] * 32 + [8.0] * 32
@@ -84,35 +155,9 @@ class LarkBot:
             level = lark.LogLevel.DEBUG,
         )
         
-        self._text_elements_pattern = re.compile(
-            (
-                f"({re.escape(self.begin_of_equation)}"
-                f".*?"
-                f"{re.escape(self.end_of_equation)})"
-            ), 
-            re.DOTALL,
-        )
-        img_pattern = f"({re.escape(self.image_placeholder)})"
-        divider_pattern = f"({re.escape(self.divider_placeholder)})"
-        h1_pattern = (
-            f"({re.escape(self.begin_of_first_heading)}"
-            f".*?"
-            f"{re.escape(self.end_of_first_heading)})"
-        )
-        h2_pattern = (
-            f"({re.escape(self.begin_of_second_heading)}"
-            f".*?"
-            f"{re.escape(self.end_of_second_heading)})"
-        )
-        h3_pattern = (
-            f"({re.escape(self.begin_of_third_heading)}"
-            f".*?"
-            f"{re.escape(self.end_of_third_heading)})"
-        )
-        self._document_blocks_pattern = re.compile(
-            f"{img_pattern}|{divider_pattern}|{h1_pattern}|{h2_pattern}|{h3_pattern}",
-            re.DOTALL,
-        )
+        # TODO: 改造这里，使之支持加粗（bold）
+        # 并且正则的编译移到类公有的里面，使得避免不同类反复编译
+        
         
         self._image_cache_size = image_cache_size
         self._image_cache: OrderedDict[str, bytes] = OrderedDict()
@@ -242,7 +287,7 @@ class LarkBot:
         
         self._event_handler_builder.register_p2_im_message_receive_v1(handler)
         
-        
+    
     def register_user_created(
         self,
         handler: Callable[[P2ContactUserCreatedV3], None],
@@ -951,17 +996,27 @@ class LarkBot:
     )-> List[TextElement]:
         
         elements: List[TextElement] = []
-        parts: List[str] = self._text_elements_pattern.split(content)
+        parts: List[str] = self.text_elements_pattern.split(content)
         for part in parts:
             if not part: continue
+            # equation
             if part.startswith(self.begin_of_equation):
                 eq_content = part[len(self.begin_of_equation):-len(self.end_of_equation)]
                 eq_content = eq_content.strip()
                 equation = Equation.builder().content(eq_content).build()
                 text_element = TextElement.builder().equation(equation).build()
                 elements.append(text_element)
+            # bold
+            elif part.startswith(self.begin_of_bold):
+                text = part[len(self.begin_of_bold):-len(self.end_of_bold)]
+                text_element_style = TextElementStyle.builder().bold(True).build()
+                text_run = TextRun.builder().content(text).text_element_style(text_element_style).build()
+                text_element = TextElement.builder().text_run(text_run).build()
+                elements.append(text_element)
+            # plain text
             else:
-                text_run = TextRun.builder().content(part).build()
+                text = part
+                text_run = TextRun.builder().content(text).build()
                 text_element = TextElement.builder().text_run(text_run).build()
                 elements.append(text_element)
         
@@ -983,6 +1038,26 @@ class LarkBot:
         text = Text.builder().elements(elements).build()
         block = Block.builder().block_type(self.text_block_type).text(text).build()
         return block
+    
+    
+    def build_code_block(
+        self,
+        content: str,
+    )-> Block:
+        
+        code_pattern_match = self.code_pattern.fullmatch(content)
+        assert code_pattern_match
+        language = code_pattern_match.group(1)
+        code_content = code_pattern_match.group(2)
+
+        elements = self.build_text_elements(
+            content = code_content,
+        )
+        
+        text_style = TextStyle.builder().language(self.language_text_style[language]).build()
+        text = Text.builder().elements(elements).style(text_style).build()
+        block = Block.builder().block_type(self.code_block_type).code(text).build()
+        return block
 
     
     def build_heading_block(
@@ -1003,6 +1078,12 @@ class LarkBot:
             return block
         elif level == 3:
             block = Block.builder().block_type(self.third_heading_block_type).heading3(text).build()
+            return block
+        elif level == 4:
+            block = Block.builder().block_type(self.forth_heading_block_type).heading4(text).build()
+            return block
+        elif level == 5:
+            block = Block.builder().block_type(self.fifth_heading_block_type).heading5(text).build()
             return block
         else:
             raise NotImplementedError
@@ -1041,7 +1122,7 @@ class LarkBot:
         
         blocks: List[Block] = []
         
-        parts: List[str] = self._document_blocks_pattern.split(content)
+        parts: List[str] = self.document_blocks_pattern.split(content)
         for part in parts:
             if not part: continue
             # image
@@ -1052,19 +1133,28 @@ class LarkBot:
             # H1 title
             elif part.startswith(self.begin_of_first_heading):
                 text = part[len(self.begin_of_first_heading):-len(self.end_of_first_heading)]
-                text = text.strip()
                 blocks.append(self.build_heading_block(text, level=1))
             # H2 title
             elif part.startswith(self.begin_of_second_heading):
                 text = part[len(self.begin_of_second_heading):-len(self.end_of_second_heading)]
-                text = text.strip()
                 blocks.append(self.build_heading_block(text, level=2))
             # H3 title
             elif part.startswith(self.begin_of_third_heading):
                 text = part[len(self.begin_of_third_heading):-len(self.end_of_third_heading)]
-                text = text.strip()
                 blocks.append(self.build_heading_block(text, level=3))
-            # text (possibly including equations)
+            # H4 title
+            elif part.startswith(self.begin_of_forth_heading):
+                text = part[len(self.begin_of_forth_heading):-len(self.end_of_forth_heading)]
+                blocks.append(self.build_heading_block(text, level=4))
+            # H5 title
+            elif part.startswith(self.begin_of_fifth_heading):
+                text = part[len(self.begin_of_fifth_heading):-len(self.end_of_fifth_heading)]
+                blocks.append(self.build_heading_block(text, level=5))
+            # code
+            elif part.startswith(self.begin_of_code):
+                content = part[len(self.begin_of_code):-len(self.end_of_code)]
+                blocks.append(self.build_code_block(content))
+            # text
             else:
                 blocks.append(self.build_text_block(part))
         

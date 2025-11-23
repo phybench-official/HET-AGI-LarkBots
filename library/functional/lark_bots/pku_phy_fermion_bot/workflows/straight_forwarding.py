@@ -7,6 +7,14 @@ __all__ = [
 ]
 
 
+system_prompt_for_physics_problems = """
+你是一位严谨的科学家。请遵循以下原则解答问题，给出详细的解题过程：
+1. **思维原子化**：将解题步骤拆解为不可再分的最小逻辑单元，严禁跳跃步骤；
+2. **溯源与说理**：每一步推导必须基于公认的基础原理或定理，拒绝直接引用的小众公式或二级结论；
+3. **诚实原则**：若你认为信息不足或无法确信答案，请直接坦诚告知，严禁强行作答或编造。
+"""
+
+
 def straight_forwarding_func_factory(
     model: str,
     lark_bot: LarkBot,
@@ -30,7 +38,7 @@ def straight_forwarding_func_factory(
         raw_response = await get_answer_async(
             prompt = problem_text,
             model = lark_bot._config["workflows"]["straight_forwarding"][model]["model"],
-            system_prompt = "请回答这道物理题目，列出详细解答过程。",
+            system_prompt = system_prompt_for_physics_problems,
             images = problem_images,
             image_placeholder = lark_bot.image_placeholder,
             temperature = lark_bot._config["workflows"]["straight_forwarding"][model]["temperature"],
@@ -51,7 +59,7 @@ def straight_forwarding_func_factory(
                 trial_interval = lark_bot._config["equation_rendering"]["trial_interval"],
             )
         else:
-            response = f"由于内部原因，{model} 输出为空，建议您再试一次"
+            response = f"由于系统内部原因，{model} 输出为空，建议您再试一次"
         
         return {
             "document_content": response,

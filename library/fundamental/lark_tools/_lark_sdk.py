@@ -24,7 +24,9 @@ from lark_oapi.api.docx.v1 import Image
 from lark_oapi.api.docx.v1 import Divider
 from lark_oapi.api.docx.v1 import TextRun
 from lark_oapi.api.docx.v1 import Equation
+from lark_oapi.api.docx.v1 import TextStyle
 from lark_oapi.api.docx.v1 import TextElement
+from lark_oapi.api.docx.v1 import TextElementStyle
 from lark_oapi.api.docx.v1 import UpdateTextRequest
 from lark_oapi.api.docx.v1 import UpdateBlockRequest
 from lark_oapi.api.docx.v1 import ReplaceImageRequest
@@ -70,7 +72,9 @@ __all__ = [
     "Divider",
     "TextRun",
     "Equation",
+    "TextStyle",
     "TextElement",
+    "TextElementStyle",
     "UpdateTextRequest",
     "UpdateBlockRequest",
     "ReplaceImageRequest",
