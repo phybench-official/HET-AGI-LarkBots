@@ -689,7 +689,12 @@ class LarkBot:
             f".*?"
             f"{re.escape(self.end_of_hyperlink)})"
         )
-        combined_pattern = re.compile(f"{image_pattern}|{hyperlink_pattern}")
+        bold_pattern = (
+            f"({re.escape(self.begin_of_bold)}"
+            f".*?"
+            f"{re.escape(self.end_of_bold)})"
+        )
+        combined_pattern = re.compile(f"{image_pattern}|{hyperlink_pattern}|{bold_pattern}")
         line_elements_list: List[List[Dict[str, Any]]] = []
         for content_line in response.split("\n"):
             line_elements: List[Dict[str, Any]] = []
@@ -699,24 +704,30 @@ class LarkBot:
                 if part == self.image_placeholder:
                     line_elements.append({
                         "tag": "img",
-                        "image_key": next(image_key_iter)
+                        "image_key": next(image_key_iter),
                     })
                 elif part.startswith(self.begin_of_hyperlink):
-                    start_len = len(self.begin_of_hyperlink)
-                    end_len = len(self.end_of_hyperlink)
-                    link_text = part[start_len:-end_len]
+                    link_text = part[len(self.begin_of_hyperlink):-len(self.end_of_hyperlink)]
                     line_elements.append({
                         "tag": "a",
                         "text": link_text,
-                        "href": next(hyperlink_iter)
+                        "href": next(hyperlink_iter),
                     })
-                else:
+                elif part.startswith(self.begin_of_bold):
+                    bold_text = part[len(self.begin_of_bold):-len(self.end_of_bold)]
                     line_elements.append({
                         "tag": "text",
-                        "text": part
+                        "text": bold_text,
+                        "style": ["bold"],
+                    })
+                else:
+                    text = part
+                    line_elements.append({
+                        "tag": "text",
+                        "text": text,
                     })
             line_elements_list.append(line_elements)
-
+        
         post_i18n_content = {
             "title": "", 
             "content": line_elements_list

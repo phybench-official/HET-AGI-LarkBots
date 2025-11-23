@@ -401,7 +401,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         response_text = (
             f"您的题目已整理进文档 {self.begin_of_hyperlink}{document_title}{self.end_of_hyperlink}\n"
             f"已在后台启动默认工作流: {', '.join(self._default_workflows)}\n\n"
-            f"您可以稍作等待（如果您的题目较难，AI 可能需要较长时间解答），也可以调用其他工作流：\n"
+            f"您可以稍作等待（如果您的题目较难，AI 可能需要较长时间解答），也可以输入数字编号以调用其他工作流：\n"
             f"{workflow_menu}"
         )
 
@@ -483,7 +483,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         mapping = {}
         for workflow_no, workflow in enumerate(self._workflows, 1):
             workflow_description = self._workflow_descriptions[workflow]
-            lines.append(f"{workflow_no}. [{workflow}] {workflow_description}")
+            lines.append(f"{self.begin_of_bold}{workflow_no}. [{workflow}]{self.end_of_bold} {workflow_description}")
             mapping[workflow_no] = workflow
         return "\n".join(lines), mapping
 
@@ -496,9 +496,9 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         tutorial_text = (
             "您好，这里是北大物院费米子 Bot。\n"
             "使用说明：\n"
-            "1. 发起解题话题：请 @ 我并发送题目；题目可以带图片。\n"
-            "2. 多次尝试不同工作流：话题建立后，可按提示调用 AI 工作流多次解题。\n"
-            "3. 指令系统：以 '/' 开头的私聊消息会被解读为指令；输入 /help 可查看可用指令。\n"
+            f"{self.begin_of_bold}1. 发起解题话题{self.end_of_bold}：请 @ 我并发送题目；题目可以带图片。\n"
+            f"{self.begin_of_bold}2. 多次尝试不同工作流{self.end_of_bold}：话题建立后，可按提示调用 AI 工作流多次解题。\n"
+            f"{self.begin_of_bold}3. 指令系统{self.end_of_bold}：以 '/' 开头的私聊消息会被解读为指令；输入 /help 可查看可用指令。\n"
             "如遇任何疑问，您可以随时联系志愿者。"
         )
         await self.reply_message_async(tutorial_text, message_id)
