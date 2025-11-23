@@ -71,7 +71,7 @@ def with_tools_func_factory(
             **kwargs,
         )-> str:
             nonlocal tool_use_trials
-            result = await original_python_tool["implementation"](**kwargs)
+            result = await asyncio.to_thread(original_python_tool["implementation"], **kwargs)
             tool_use_trials.append({
                 "name": "Python",
                 "input": f"{lark_bot.begin_of_code}{lark_bot.begin_of_language}Python{lark_bot.end_of_language}{lark_bot.begin_of_content}{kwargs['code']}{lark_bot.end_of_content}{lark_bot.end_of_code}",
