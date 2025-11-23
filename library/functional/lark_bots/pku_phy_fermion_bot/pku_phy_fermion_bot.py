@@ -467,7 +467,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
                 status_hint = f"\n当前有 {running_workflows} 个工作流正在运行。"
 
             await self.reply_message_async(
-                response = f"未识别指令。请回复以下序号或名称启动解题：\n{workflow_menu}{status_hint}",
+                response = f"未成功识别工作流；您可以回复以下工作流的编号或名称启动解题：\n{workflow_menu}{status_hint}",
                 message_id = message_id,
                 reply_in_thread = True
             )
@@ -548,33 +548,36 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
                     **workflow_result,
                 }
                 context["trials"].append(trial_record)
+                # 按照工作流完成的时间顺序，把成功的工作流加到 trials 里并推送到飞书云文档中
                 await self._push_latest_trial_to_document(context)
                 
                 context["running_workflows"] -= 1
+                running_workflows = context["running_workflows"]
             
             document_title = context["document_title"]
             document_url = context["document_url"]
             
-            await self.reply_message_async(
-                response = f"[{workflow_name}] 工作流执行完毕，结果已追加至云文档。\n文档链接: {self.begin_of_hyperlink}{document_title}{self.end_of_hyperlink}",
-                message_id = reply_message_id,
-                hyperlinks = [document_url],
-                reply_in_thread = True,
-            )
+            if running_workflows:
+                await self.reply_message_async(
+                    response = f"{self.begin_of_bold}[{workflow_name}]{self.end_of_bold} 工作流执行完毕，结果已追加至云文档。\n文档链接: {self.begin_of_hyperlink}{document_title}{self.end_of_hyperlink}",
+                    message_id = reply_message_id,
+                    hyperlinks = [document_url],
+                    reply_in_thread = True,
+                )
+            else:
+                await self.reply_message_async(
+                    response = f"{self.begin_of_bold}[{workflow_name}]{self.end_of_bold} 工作流执行完毕，结果已追加至云文档。\n文档链接: {self.begin_of_hyperlink}{document_title}{self.end_of_hyperlink}\n当前无运行中的工作流。若已完成解题，您可以输入“归档”终止此解题话题。",
+                    message_id = reply_message_id,
+                    hyperlinks = [document_url],
+                    reply_in_thread = True,
+                )
 
         except Exception as error:
             print(f"[PkuPhyFermionBot] Workflow {workflow_name} failed: {error}\n{traceback.format_exc()}")
             async with context["lock"]:
-                context["trials"].append({
-                    "workflow": workflow_name,
-                    "status": "failed",
-                    "start_time": start_time,
-                    "end_time": get_time_stamp(),
-                    "error": str(error),
-                })
                 context["running_workflows"] -= 1
             await self.reply_message_async(
-                response = f"[{workflow_name}] 非常抱歉，工作流执行出错: {str(error)}\n您可以联系志愿者以排查问题。",
+                response = f"{self.begin_of_bold}[{workflow_name}]{self.end_of_bold} 非常抱歉，工作流执行出错: {str(error)}\n您可以联系志愿者以排查问题。",
                 message_id = reply_message_id,
                 reply_in_thread = True,
             )

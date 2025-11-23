@@ -39,8 +39,9 @@ class LarkBot:
     image_block_type = 27
     
     language_text_style = {
-        "Plain Text": 0,
+        "Plain Text": 1,
         "Python": 9,
+        "JSON": 19,
     }
     
     image_placeholder = f"<image_{never_used_string}>"
@@ -727,7 +728,7 @@ class LarkBot:
                         "text": text,
                     })
             line_elements_list.append(line_elements)
-        
+
         post_i18n_content = {
             "title": "", 
             "content": line_elements_list
@@ -1359,6 +1360,7 @@ class LarkBot:
         insert_response = await self._lark_client.docx.v1.document_block_children.acreate(insert_request)
         
         if not insert_response.success():
+            print(f"[LarkBot] 添加 Block 至文档末尾出错！状态码：{insert_response.code}，错误码：{insert_response.error}")
             raise RuntimeError(f"Failed to append blocks: {insert_response.code} {insert_response.msg}")
         
         assert insert_response.data

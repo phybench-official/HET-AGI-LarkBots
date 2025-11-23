@@ -75,7 +75,7 @@ def with_tools_func_factory(
             tool_use_trials.append({
                 "name": "Python",
                 "input": f"{lark_bot.begin_of_code}{lark_bot.begin_of_language}Python{lark_bot.end_of_language}{lark_bot.begin_of_content}{kwargs['code']}{lark_bot.end_of_content}{lark_bot.end_of_code}",
-                "output": f"{lark_bot.begin_of_code}{lark_bot.begin_of_language}Plain Text{lark_bot.end_of_language}{lark_bot.begin_of_content}{result}{lark_bot.end_of_content}{lark_bot.end_of_code}",
+                "output": f"{lark_bot.begin_of_code}{lark_bot.begin_of_language}Python{lark_bot.end_of_language}{lark_bot.begin_of_content}{result}{lark_bot.end_of_content}{lark_bot.end_of_code}",
             })
             return result
         async def hijacked_mathematica_tool_implementation(
@@ -86,7 +86,7 @@ def with_tools_func_factory(
             tool_use_trials.append({
                 "name": "Mathematica",
                 "input": f"{lark_bot.begin_of_code}{lark_bot.begin_of_language}Plain Text{lark_bot.end_of_language}{lark_bot.begin_of_content}{kwargs['code']}{lark_bot.end_of_content}{lark_bot.end_of_code}",
-                "output": f"{lark_bot.begin_of_code}{lark_bot.begin_of_language}Plain Text{lark_bot.end_of_language}{lark_bot.begin_of_content}{result}{lark_bot.end_of_content}{lark_bot.end_of_code}",
+                "output": f"{lark_bot.begin_of_code}{lark_bot.begin_of_language}JSON{lark_bot.end_of_language}{lark_bot.begin_of_content}{result}{lark_bot.end_of_content}{lark_bot.end_of_code}",
             })
             return result
         hijacked_python_tool["implementation"] = hijacked_python_tool_implementation
@@ -134,23 +134,12 @@ def with_tools_func_factory(
             for index, tool_use_trial in enumerate(tool_use_trials, 1):
                 document_content += (
                     f"{lark_bot.begin_of_fifth_heading}"
-                    f"工具调用 {index} | {tool_use_trial['name']}"
+                    f"第 {index} 次工具调用 | {tool_use_trial['name']}"
                     f"{lark_bot.end_of_fifth_heading}"
                 )
-                document_content += (
-                    f"{lark_bot.begin_of_bold}"
-                    f"工具调用输入："
-                    f"{lark_bot.end_of_bold}"
-                )
-                document_content += "\n"
+                document_content += f"工具调用输入："
                 document_content += tool_use_trial["input"]
-                document_content += "\n"
-                document_content += (
-                    f"{lark_bot.begin_of_bold}"
-                    f"工具调用输出："
-                    f"{lark_bot.end_of_bold}"
-                )
-                document_content += "\n"
+                document_content += f"工具调用输出："
                 document_content += tool_use_trial["output"]
         
         return {

@@ -121,7 +121,7 @@ Please analyze the content in <input_text> and extract information into a JSON o
 </input_text>
 
 <principles_recap>
-1. **Format**: Explicitly use ```json ... ``` block.
+1. **Format**: Explicitly use ```json ... ``` block. Correctly deal with escapes: "\\" -> "\\\\", "\\n" -> "\\\\n"
 2. **Clean Text**: Remove prefixes. Separate Q & A.
 3. **Image Handling**: Refer to images IF present; otherwise just handle text. No OCR.
 4. **NO INFERENCE**: If answer is missing, write "暂无". **STRICTLY FORBIDDEN TO SOLVE.**
