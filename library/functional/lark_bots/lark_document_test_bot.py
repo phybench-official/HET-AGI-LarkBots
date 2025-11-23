@@ -11,6 +11,7 @@ class LarkDocumentTestBot(ParallelThreadLarkBot):
     def __init__(
         self,
         config_path: str,
+        image_cache_size: int = 128,
         worker_timeout: float = 600.0,
         context_cache_size: int = 1024,
         max_workers: Optional[int] = None,
@@ -18,6 +19,7 @@ class LarkDocumentTestBot(ParallelThreadLarkBot):
 
         super().__init__(
             config_path = config_path,
+            image_cache_size = image_cache_size,
             worker_timeout = worker_timeout,
             context_cache_size = context_cache_size,
             max_workers = max_workers,

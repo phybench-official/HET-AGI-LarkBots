@@ -6,8 +6,8 @@ async def main():
     
     models_to_test = [
         "Gemini-2.5-Pro-for-HET-AGI",
-        "GPT-5-for-HET-AGI",
-        "GPT-5-Nano-for-HET-AGI",
+        "GPT-5-Pro-for-HET-AGI",
+        "Qwen3-Max-for-HET-AGI",
     ]
     
     coroutines = []
@@ -16,7 +16,7 @@ async def main():
             prompt = "你是谁？是哪个组织制造的什么模型？何时被推出？知识截止至何时？",
             model = model,
         ))
-        
+    
     for model, coroutine in zip(models_to_test, coroutines):
         response = await coroutine
         print(f"[{model}]\n{response}")

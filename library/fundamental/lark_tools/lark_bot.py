@@ -15,23 +15,12 @@ __all__ = [
 ]
 
 
-def get_lark_bot_token(
-    lark_bot_name: str,
-)-> Tuple[str, str, str]:
-    
-    app_token_dict = load_from_json("lark_api_keys.json")
-    app_id = app_token_dict[lark_bot_name]["app_id"]
-    app_secret = app_token_dict[lark_bot_name]["app_secret"]
-    open_id = app_token_dict[lark_bot_name]["open_id"]
-    return app_id, app_secret, open_id
-
-
 def get_lark_document_url(
     tenant: str,
     document_id: str,
 )-> str:
     
-    lark_document_url = f"https://{tenant}.feishu.cn/docx/{document_id}?from=from_copylink\\"
+    lark_document_url = f"https://{tenant}.feishu.cn/docx/{document_id}"
     return lark_document_url
 
 
@@ -69,10 +58,12 @@ class LarkBot:
     def __init__(
         self,
         config_path: str,
+        image_cache_size: int = 128,
     )-> None:
         
         self._init_arguments: Dict[str, Any] = {
             "config_path": config_path,
+            "image_cache_size": image_cache_size,
         }
         
         self._load_config(config_path)
@@ -122,8 +113,12 @@ class LarkBot:
             f"{img_pattern}|{divider_pattern}|{h1_pattern}|{h2_pattern}|{h3_pattern}",
             re.DOTALL,
         )
+        
+        self._image_cache_size = image_cache_size
+        self._image_cache: OrderedDict[str, bytes] = OrderedDict()
+        self._image_cache_lock = asyncio.Lock()
     
-     
+    
     def _load_config(
         self,
         config_path: str,
@@ -504,26 +499,49 @@ class LarkBot:
         image_keys: List[str],
     )-> List[bytes]:
         
-        image_bytes_list: List[bytes] = []
-        if image_keys:
+        if not image_keys: return []
+        
+        missing_keys: List[str] = []
+        async with self._image_cache_lock:
+            for key in image_keys:
+                if key in self._image_cache:
+                    self._image_cache.move_to_end(key)
+                else:
+                    missing_keys.append(key)
+        
+        if missing_keys:
             task_inputs: List[Tuple[Any, ...]] = [
                 (message_id, image_key, "image") 
-                for image_key in image_keys
+                for image_key in missing_keys
             ]
             results_dict = await run_tasks_concurrently_async(
                 task = self.get_message_resource_async,
-                task_indexers = image_keys,
+                task_indexers = missing_keys,
                 task_inputs = task_inputs,
                 show_progress_bar = False,
             )
-            for image_key in image_keys:
-                result = results_dict[image_key]
-                if not result.success():
-                    raise RuntimeError(
-                        f"下载图片资源 {image_key} 失败: {result.code}, {result.msg}"
-                    )
-                image_bytes_list.append(result.file.read())
-        return image_bytes_list
+            async with self._image_cache_lock:
+                for image_key in missing_keys:
+                    result = results_dict[image_key]
+                    if not result.success():
+                        raise RuntimeError(
+                            f"下载图片资源 {image_key} 失败: {result.code}, {result.msg}"
+                        )
+                    image_data = result.file.read()
+                    self._image_cache[image_key] = image_data
+                    self._image_cache.move_to_end(image_key)
+                while len(self._image_cache) > self._image_cache_size:
+                    self._image_cache.popitem(last=False)
+
+        final_images: List[bytes] = []
+        async with self._image_cache_lock:
+            for key in image_keys:
+                if key in self._image_cache:
+                    final_images.append(self._image_cache[key])
+                else:
+                    raise RuntimeError(f"Cache miss during assembly for {key}")
+              
+        return final_images
     
     
     def _build_create_image_request(

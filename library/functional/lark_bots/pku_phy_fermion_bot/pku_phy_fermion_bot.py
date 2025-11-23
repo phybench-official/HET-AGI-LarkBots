@@ -15,13 +15,15 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
     def __init__(
         self,
         config_path: str,
-        worker_timeout: float = 600.0,
+        image_cache_size: int = 128,
+        worker_timeout: float = 3600.0,
         context_cache_size: int = 1024,
         max_workers: Optional[int] = None,
     )-> None:
 
         super().__init__(
             config_path = config_path,
+            image_cache_size = image_cache_size,
             worker_timeout = worker_timeout,
             context_cache_size = context_cache_size,
             max_workers = max_workers,
@@ -34,6 +36,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         # 另外，由于会被运行两次，所以 __init__ 方法应是轻量级且幂等的
         self._init_arguments: Dict[str, Any] = {
             "config_path": config_path,
+            "image_cache_size": image_cache_size,
             "worker_timeout": worker_timeout,
             "context_cache_size": context_cache_size,
             "max_workers": max_workers,
@@ -58,20 +61,26 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         self._workflows: List[str] = [
             "Gemini-2.5-Pro with tools",
             "GPT-5-Pro with tools",
+            "Qwen3-Max with tools",
             "Gemini-2.5-Pro",
             "GPT-5-Pro",
+            "Qwen3-Max",
         ]
         self._workflow_descriptions: Dict[str, str] = {
             "Gemini-2.5-Pro with tools": "允许 Gemini-2.5-Pro 调用 Python 和 Mathematica 解题",
             "GPT-5-Pro with tools": "允许 GPT-5-Pro 调用 Python 和 Mathematica 解题",
+            "Qwen3-Max with tools": "允许 Qwen3-Max 调用 Python 和 Mathematica 解题，仅支持纯文本题目",
             "Gemini-2.5-Pro": "直接让 Gemini-2.5-Pro 解题",
             "GPT-5-Pro": "直接让 GPT-5-Pro 解题",
+            "Qwen3-Max": "直接让 Qwen3-Max 解题，仅支持纯文本题目",
         }
-        self._workflow_implementations: Dict[str, Callable[[Dict[str, Any]], Coroutine[Any, Any, Dict[str, Any]]]] = {
+        self._workflow_implementations: Dict[str, Callable[[Dict[str, Any]], Awaitable[Dict[str, Any]]]] = {
             "Gemini-2.5-Pro with tools": with_tools_func_factory("Gemini-2.5-Pro", self),
             "GPT-5-Pro with tools": with_tools_func_factory("GPT-5-Pro", self),
+            "Qwen3-Max with tools": with_tools_func_factory("Qwen3-Max", self),
             "Gemini-2.5-Pro": straight_forwarding_func_factory("Gemini-2.5-Pro", self),
             "GPT-5-Pro": straight_forwarding_func_factory("GPT-5-Pro", self),
+            "Qwen3-Max": straight_forwarding_func_factory("Qwen3-Max", self),
         }
         self._default_workflows: List[str] = [
             "Gemini-2.5-Pro with tools",
@@ -148,6 +157,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         is_accepted: bool = thread_root_id in self._acceptance_cache
         
         return {
+            "is_tombstone": False,
             "lock": asyncio.Lock(), 
             "thread_root_id": thread_root_id,
             "is_accepted": is_accepted,
@@ -178,20 +188,11 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         context: Dict[str, Any],
     )-> None:
         
-        message_id = parsed_message["message_id"]
         text: str = parsed_message["text"]
         image_keys: List[str] = parsed_message["image_keys"]
         
-        if len(image_keys):
-            images = await self.download_message_images_async(
-                message_id = message_id,
-                image_keys = image_keys,
-            )
-        else:
-            images = []
-        
         context["history"]["prompt"].append(text)
-        context["history"]["images"].extend(images)
+        context["history"]["images"].extend(image_keys)
         context["history"]["roles"].append("user")
     
 
@@ -273,8 +274,13 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         await self._maintain_context_history(parsed_message, context)
         assert len(context["history"]["prompt"]) == 1
         raw_text = context["history"]["prompt"][0]
-        raw_images = context["history"]["images"]
+        raw_image_keys = context["history"]["images"]
+        
         clean_text = raw_text.replace(self.image_placeholder, "").replace(self._mention_me_text, "")
+        raw_images = await self.download_message_images_async(
+            message_id = message_id,
+            image_keys = raw_image_keys,
+        )
 
         try:
             understand_result = await understand_problem_async(
@@ -331,7 +337,8 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
 
         context["problem_no"] = problem_no
         context["problem_text"] = problem_text
-        context["problem_images"] = raw_images
+        context["problem_images"] = raw_image_keys
+        context["problem_message_id"] = message_id
         context["answer"] = answer
         context["document_created"] = True
         context["document_id"] = document_id
@@ -339,6 +346,29 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         context["document_url"] = document_url
         context["document_block_num"] = 0
         
+        # 防止内存泄漏：父类已驱逐的话题，context 变为墓碑；条件触发
+        if len(self._problem_id_to_context) > self._init_arguments["context_cache_size"] * 1.1:
+            alive_context_ids = {id(ctx) for ctx in self._context_cache.values()}
+            ids_to_shrink = []
+            for pid, ctx in self._problem_id_to_context.items():
+                if id(ctx) not in alive_context_ids and not ctx["is_tombstone"]:
+                    ids_to_shrink.append(pid)
+            for pid in ids_to_shrink:
+                old_ctx = self._problem_id_to_context[pid]
+                tombstone_ctx = {
+                    "is_tombstone": True,
+                    "problem_no": old_ctx.get("problem_no"), 
+                    "document_title": old_ctx["document_title"],
+                    "document_url": old_ctx["document_url"],
+                    "is_archived": True,
+                    "trials": [],
+                    "history": {},
+                }
+                # 替换引用后，设想 Python 的 GC 会自动释放原 context 的内存
+                self._problem_id_to_context[pid] = tombstone_ctx
+            if ids_to_shrink:
+                print(f"[PkuPhyFermionBot] 内存优化: 将 {len(ids_to_shrink)} 个旧题目缩略为墓碑索引。")
+
         self._problem_id_to_context[problem_no] = context
         
         content = ""
@@ -368,7 +398,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         response_text = (
             f"您的题目已整理进文档 {self.begin_of_hyperlink}{document_title}{self.end_of_hyperlink}\n"
             f"已在后台启动默认工作流: {', '.join(self._default_workflows)}\n\n"
-            f"您可以稍作等待，也可以调用其他工作流：\n"
+            f"您可以稍作等待（如果您的题目较难，AI 可能需要较长时间解答），也可以调用其他工作流：\n"
             f"{workflow_menu}"
         )
 
@@ -562,27 +592,20 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         self,
         context: Dict[str, Any],
     )-> None:
-        """
-        将 Context 中最新的 Trial 追加到云文档。
-        该方法必须在 context["lock"] 保护下调用。
-        """
-        if not context["trials"]:
-            return
-
-        latest_trial = context["trials"][-1]
         
-        if latest_trial["status"] != "success":
-            return
-
-        workflow_name = latest_trial["workflow"]
-        # trial_no 直接取列表长度
+        """
+        将 context 中最新的 trial 追加到云文档，加锁调用
+        """
+        
+        latest_trial = context["trials"][-1]
+        if latest_trial["status"] != "success": return
         trial_no = len(context["trials"]) 
-        doc_content = latest_trial["document_content"]
-        images = latest_trial.get("images", [])
+        workflow_name = latest_trial["workflow"]
+        document_content = latest_trial["document_content"]
 
         content_str = ""
         content_str += f"{self.begin_of_third_heading}AI 解答 {trial_no} | {workflow_name}{self.end_of_third_heading}"
-        content_str += doc_content.strip()
+        content_str += document_content.strip()
         content_str += self.divider_placeholder
         
         blocks = self.build_document_blocks(content_str)
@@ -590,29 +613,8 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         await self.append_document_blocks_async(
             document_id = context["document_id"],
             blocks = blocks,
-            images = images,
         )
-
-
-    async def _workflow_default(
-        self,
-        context: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        await asyncio.sleep(2)
-        return {
-            "document_content": "这是默认工作流生成的测试内容 (Mock)。",
-        }
-
     
-    async def _workflow_deep_think(
-        self,
-        context: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        await asyncio.sleep(5)
-        return {
-            "document_content": f"这是深度思考工作流生成的详细解析 (Mock)。\n包含公式：{self.begin_of_equation}E=mc^2{self.end_of_equation}",
-        }
-        
     
     def _handle_user_created_bridge(
         self,
@@ -744,7 +746,12 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
                 if context is not None:
                     title = context["document_title"]
                     document_url = context["document_url"]
-                    status = "[归档]" if context["is_archived"] else "[活跃]"
+                    if context["is_tombstone"]:
+                        status = "[清理]"
+                    elif context["is_archived"]:
+                        status = "[归档]"
+                    else:
+                        status = "[活跃]"
                     lines.append(f"#{problem_id:<4} {status} {self.begin_of_hyperlink}{title}{self.end_of_hyperlink}")
                     hyperlinks.append(document_url)
                 else:
@@ -786,14 +793,19 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             if context is None:
                 await self.reply_message_async(f"错误: 内存中未找到题目 #{target_id}", message_id)
                 return
-            
-            # Info View
+
             document_title = context["document_title"]
             document_url = context["document_url"]
-            status = "已归档" if context["is_archived"] else "进行中"
-            last_workflow = "无"
-            if context["trials"]:
-                last_workflow = context["trials"][-1]["workflow"]
+            is_tombstone = context["is_tombstone"]
+            
+            if is_tombstone:
+                status = "已清理 (仅索引)"
+                last_workflow = "数据已释放"
+            else:
+                status = "已归档" if context.get("is_archived") else "进行中"
+                last_workflow = "无"
+                if context.get("trials"):
+                    last_workflow = context["trials"][-1]["workflow"]
             
             info = (
                 f"题目编号:   {target_id}\n"
@@ -804,9 +816,9 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
             
             if verbose:
                 debug_view = {k: v for k, v in context.items() if k not in ["history", "lock"]}
-                debug_view["history_len"] = len(context["history"].get("prompt", []))
-                debug_view["trials_count"] = len(context["trials"])
-                
+                history = context.get("history", {})
+                debug_view["history_len"] = len(history.get("prompt", [])) if isinstance(history, dict) else 0
+                debug_view["trials_count"] = len(context.get("trials", []))
                 json_str = json.dumps(debug_view, indent=2, default=str, ensure_ascii=False)
                 info += f"\n上下文转储 (Dump):\n{json_str}"
 
@@ -817,7 +829,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
                 reply_in_thread = False,
             )
             return None
-
+        
         elif command == "/update_config":
             target_path = args[1] if len(args) > 1 else self._config_path
             await self.reply_message_async(

@@ -23,9 +23,9 @@ async def render_equation_async(
     飞书云文档是不区分行内公式和行间公式的，所以允许模型微调排版，但严禁擅自改变内容
     """
     
-    image_placeholder = "<image_never_used_114514_1919810>"
+    image_placeholder = "<image_never_used>"
     
-    # 采用 XML 结构 + 指令三明治 + Few-Shots (JSON 格式)
+    # 采用 XML 结构 + CDATA 以彻底解决 JSON 转义灾难和长文本指令不遵循问题
     prompt = f"""
 <system_role>
 You are a professional typesetting and equation rendering assistant.
@@ -51,7 +51,10 @@ Please process the content in <input_text> following these rules:
    - **Keep English as English.**
    - **Do NOT translate.**
 6. **Preserve Content**: Do not change the wording, summary, or logic. Only adjust formatting.
-7. **Format**: Output the result strictly as a JSON code block; **explicitly offer enclosing ```json and ```** for extraction convenience.
+7. **Output Format**: 
+   - Output the result strictly enclosed in XML tags `<rendered_text>`.
+   - It is HIGHLY RECOMMENDED to use CDATA sections `<![CDATA[ ... ]]>` to wrap the content. This prevents parsing errors if the text contains characters like `<` or `&`.
+   - **Do NOT escape backslashes.** Write `\\alpha` as `\\alpha`, not `\\\\alpha`.
 </instruction>
 
 <examples>
@@ -60,13 +63,9 @@ Please process the content in <input_text> following these rules:
         这道题的答案是 $x = 5$。我们都知道 $$E = mc^2$$ 是很有名的公式。
         </input>
         <output>
-        ```json
-        {{
-            "rendered_text": "这道题的答案是 {begin_of_equation}x = 5{end_of_equation}。我们都知道 {begin_of_equation}E = mc^2{end_of_equation} 是很有名的公式。"
-        }}
-        ```
+        <rendered_text><![CDATA[这道题的答案是 {begin_of_equation}x = 5{end_of_equation}。我们都知道 {begin_of_equation}E = mc^2{end_of_equation} 是很有名的公式。]]></rendered_text>
         </output>
-        <note>Original language (Chinese) preserved. $ and $$ removed.</note>
+        <note>Original language preserved. $ and $$ removed. CDATA used for safety.</note>
     </example_1>
 
     <example_2>
@@ -74,13 +73,9 @@ Please process the content in <input_text> following these rules:
         Please run the function execute_mathematica to solve differential equation y' = y.
         </input>
         <output>
-        ```json
-        {{
-            "rendered_text": "Please run the function execute_mathematica to solve differential equation {begin_of_equation}y' = y{end_of_equation}."
-        }}
-        ```
+        <rendered_text><![CDATA[Please run the function execute_mathematica to solve differential equation {begin_of_equation}y' = y{end_of_equation}.]]></rendered_text>
         </output>
-        <note>"execute_mathematica" is NOT wrapped because it is code/English. "y' = y" IS wrapped.</note>
+        <note>"execute_mathematica" is NOT wrapped. "y' = y" IS wrapped.</note>
     </example_2>
 
     <example_3>
@@ -88,12 +83,9 @@ Please process the content in <input_text> following these rules:
         Let $\\alpha$ be the angle. The value is 10.
         </input>
         <output>
-        ```json
-        {{
-            "rendered_text": "Let {begin_of_equation}\\alpha{end_of_equation} be the angle. The value is 10."
-        }}
-        ```
+        <rendered_text><![CDATA[Let {begin_of_equation}\\alpha{end_of_equation} be the angle. The value is 10.]]></rendered_text>
         </output>
+        <note>Backslash preserved as single backslash inside CDATA.</note>
     </example_3>
 </examples>
 
@@ -102,14 +94,14 @@ Please process the content in <input_text> following these rules:
 </input_text>
 
 <principles_recap>
-1. Output format: JSON code block with key "rendered_text"; ensure explicit closure.
+1. Output format: `<rendered_text><![CDATA[ YOUR_CONTENT_HERE ]]></rendered_text>`.
 2. **CRITICAL**: Remove old `$` or `$$` symbols completely.
 3. **CRITICAL**: Do NOT wrap code function names or plain English.
-4. **CRITICAL**: **Do NOT translate.** Keep Chinese as Chinese, English as English.
+4. **CRITICAL**: **Do NOT translate.**
 5. **CRITICAL**: Wrap all actual math variables and equations with {begin_of_equation} and {end_of_equation}.
 </principles_recap>
 
-Please generate the JSON response now.
+Please generate the XML response now.
 """
 
     result = {}
@@ -120,33 +112,34 @@ Please generate the JSON response now.
         nonlocal result
         print(f"Render Equation: checking the following response now\n{response}")
         try:
-            halfway_result = {}
-            json_pattern = r'```json\s*(.*?)\s*```'
-            matches = re.findall(json_pattern, response, re.DOTALL)
+            # 使用 Regex 健壮地提取 XML 标签中的内容
+            # 兼容模型输出 CDATA 或直接输出文本的情况
+            # 模式解释:
+            # <rendered_text>         : 起始标签
+            # \s* : 容忍标签后的空白
+            # (?:<!\[CDATA\[)?        : 可选的 CDATA 开始标记 (非捕获组)
+            # (.*?)                   : 捕获核心内容 (非贪婪匹配，配合 DOTALL 匹配换行符)
+            # (?:\]\]>)?              : 可选的 CDATA 结束标记 (非捕获组)
+            # \s* : 容忍空白
+            # </rendered_text>        : 结束标签
+            
+            xml_pattern = r'<rendered_text>\s*(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?\s*</rendered_text>'
+            matches = re.findall(xml_pattern, response, re.DOTALL | re.IGNORECASE)
             
             if not matches:
-                # Fallback: try to parse raw JSON if markdown tags are missing
-                try:
-                    deserialize_json(response.strip())
-                    json_string = response.strip()
-                except:
-                    return False
-            else:
-                json_string = matches[0].strip()
+                return False
             
-            json_dict = deserialize_json(json_string)
+            extracted_text = matches[0]
             
-            assert "rendered_text" in json_dict
-            assert isinstance(json_dict["rendered_text"], str)
+            # 如果原文不为空，但提取出的内容全是空白，视为无效响应
+            if text.strip() and not extracted_text.strip():
+                return False
             
-            # Ensure the output is not empty if input wasn't
-            if text.strip():
-                assert json_dict["rendered_text"].strip()
-            
-            halfway_result["rendered_text"] = json_dict["rendered_text"]
-            result = halfway_result
+            # 提取出的内容即为最终文本，无需像 JSON 那样进行反序列化，避免了转义符地狱
+            result["rendered_text"] = extracted_text
             return True
-        except:
+        except Exception as e:
+            print(f"Render Equation: check_and_accept failed with error: {e}")
             return False
 
     _ = await get_answer_async(

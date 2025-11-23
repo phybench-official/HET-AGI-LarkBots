@@ -14,6 +14,7 @@ class ParallelThreadLarkBot(LarkBot):
     def __init__(
         self,
         config_path: str,
+        image_cache_size: int,
         worker_timeout: float,
         context_cache_size: int,
         max_workers: Optional[int],
@@ -24,6 +25,8 @@ class ParallelThreadLarkBot(LarkBot):
         )
         
         self._init_arguments: Dict[str, Any] = {
+            "config_path": config_path,
+            "image_cache_size": image_cache_size,
             "worker_timeout": worker_timeout,
             "context_cache_size": context_cache_size,
             "max_workers": max_workers,

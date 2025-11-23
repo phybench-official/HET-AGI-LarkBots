@@ -10,14 +10,22 @@ __all__ = [
 def straight_forwarding_func_factory(
     model: str,
     lark_bot: LarkBot,
-)-> Callable[[Dict[str, Any]], Coroutine[Any, Any, Dict[str, Any]]]:
+)-> Callable[[Dict[str, Any]], Awaitable[Dict[str, Any]]]:
     
     async def workflow_func(
         context: Dict[str, Any],
     )-> Dict[str, Any]:
         
         problem_text = context["problem_text"]
-        problem_images = context["problem_images"]
+        problem_image_keys = context["problem_images"]
+        problem_message_id = context["problem_message_id"]
+        if problem_image_keys:
+            problem_images = await lark_bot.download_message_images_async(
+                message_id = problem_message_id,
+                image_keys = problem_image_keys,
+            )
+        else:
+            problem_images = []
         
         raw_response = await get_answer_async(
             prompt = problem_text,

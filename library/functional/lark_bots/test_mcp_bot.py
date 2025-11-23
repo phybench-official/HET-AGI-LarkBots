@@ -75,6 +75,7 @@ class TestMCPBot(ParallelThreadLarkBot):
     def __init__(
         self,
         config_path: str,
+        image_cache_size: int = 128,
         model_name: str = "GPT-5",
         mcp_server_name: str = "mathematica",
         mcp_config_path: str = "mcp_servers_config.json",
@@ -86,10 +87,28 @@ class TestMCPBot(ParallelThreadLarkBot):
 
         super().__init__(
             config_path = config_path,
+            image_cache_size = image_cache_size,
             worker_timeout = worker_timeout,
             context_cache_size = context_cache_size,
             max_workers = max_workers,
         )
+        
+        # start 动作的逻辑是会在子进程中再跑一个机器人
+        # 这样可以暴露简洁的 API，把不同机器人隔离在不同进程中，防止底层库报错
+        # 这背后依赖属性 _init_arguments
+        # 所以子类如果签名改变，有义务自行维护 _init_arguments
+        # 另外，由于会被运行两次，所以 __init__ 方法应是轻量级且幂等的
+        self._init_arguments: Dict[str, Any] = {
+            "config_path": config_path,
+            "image_cache_size": image_cache_size,
+            "model_name": model_name,
+            "mcp_server_name": mcp_server_name,
+            "mcp_config_path": mcp_config_path,
+            "api_keys_path": api_keys_path,
+            "worker_timeout": worker_timeout,
+            "context_cache_size": context_cache_size,
+            "max_workers": max_workers,
+        }
 
         # 模型和 MCP 配置
         self.model_name = model_name
