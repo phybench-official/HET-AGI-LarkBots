@@ -62,31 +62,31 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         self._problem_id_to_context: Dict[int, Dict[str, Any]] = {}
 
         self._workflows: List[str] = [
+            "Qwen-Max with tools",
             "Gemini-2.5-Pro with tools",
-            "GPT-5-Pro with tools",
-            "Qwen3-Max with tools",
+            "GPT-5 with tools",
+            "Qwen-Max",
             "Gemini-2.5-Pro",
-            "GPT-5-Pro",
-            "Qwen3-Max",
+            "GPT-5",
         ]
         self._workflow_descriptions: Dict[str, str] = {
+            "Qwen-Max with tools": "允许 Qwen-Max 调用 Python 和 Mathematica 解题，最稳定，仅支持纯文本题目",
             "Gemini-2.5-Pro with tools": "允许 Gemini-2.5-Pro 调用 Python 和 Mathematica 解题",
-            "GPT-5-Pro with tools": "允许 GPT-5-Pro 调用 Python 和 Mathematica 解题",
-            "Qwen3-Max with tools": "允许 Qwen3-Max 调用 Python 和 Mathematica 解题，仅支持纯文本题目",
+            "GPT-5 with tools": "允许 GPT-5 调用 Python 和 Mathematica 解题",
+            "Qwen-Max": "直接让 Qwen-Max 解题，最稳定，仅支持纯文本题目",
             "Gemini-2.5-Pro": "直接让 Gemini-2.5-Pro 解题",
-            "GPT-5-Pro": "直接让 GPT-5-Pro 解题",
-            "Qwen3-Max": "直接让 Qwen3-Max 解题，仅支持纯文本题目",
+            "GPT-5": "直接让 GPT-5 解题",
         }
         self._workflow_implementations: Dict[str, Callable[[Dict[str, Any]], Awaitable[Dict[str, Any]]]] = {
+            "Qwen-Max with tools": with_tools_func_factory("Qwen-Max", self),
             "Gemini-2.5-Pro with tools": with_tools_func_factory("Gemini-2.5-Pro", self),
-            "GPT-5-Pro with tools": with_tools_func_factory("GPT-5-Pro", self),
-            "Qwen3-Max with tools": with_tools_func_factory("Qwen3-Max", self),
+            "GPT-5 with tools": with_tools_func_factory("GPT-5", self),
+            "Qwen-Max": straight_forwarding_func_factory("Qwen-Max", self),
             "Gemini-2.5-Pro": straight_forwarding_func_factory("Gemini-2.5-Pro", self),
-            "GPT-5-Pro": straight_forwarding_func_factory("GPT-5-Pro", self),
-            "Qwen3-Max": straight_forwarding_func_factory("Qwen3-Max", self),
+            "GPT-5": straight_forwarding_func_factory("GPT-5", self),
         }
         self._default_workflows: List[str] = [
-            "Gemini-2.5-Pro with tools",
+            "Qwen-Max with tools",
         ]
         
         self.register_user_created(self._handle_user_created_bridge)

@@ -6,8 +6,8 @@ async def main():
     
     models_to_test = [
         "Gemini-2.5-Pro-for-HET-AGI",
-        "GPT-5-Pro-for-HET-AGI",
-        "Qwen3-Max-for-HET-AGI",
+        "GPT-5-for-HET-AGI",
+        "Qwen-Max-for-HET-AGI",
     ]
     
     coroutines = []
