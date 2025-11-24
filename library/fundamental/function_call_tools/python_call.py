@@ -2,8 +2,9 @@ import io
 import traceback
 import contextlib
 import functools
+import multiprocessing
+from queue import Empty
 from typing import Any, Dict, Callable
-import multiprocessing as mp
 from multiprocessing import Queue
 
 
@@ -40,52 +41,46 @@ def _execute_python(
     code: str,
     timeout: int,
     verbose: bool,
-)-> str:
-    
-    result_queue: "Queue[str]" = mp.Queue()
-    
-    process = mp.Process(
-        target=_execute_in_sandbox,
-        args=(code, result_queue)
+) -> str:
+    result_queue: "Queue[str]" = multiprocessing.Queue()
+
+    process = multiprocessing.Process(
+        target = _execute_in_sandbox,
+        args = (code, result_queue),
     )
-    
+
     output: str = ""
-    
+    is_success: bool = False
+
     try:
         process.start()
-        process.join(timeout=timeout)
-        
-        if process.is_alive():
-            process.terminate()
-            process.join()
+        try:
+            output = result_queue.get(timeout = timeout)
+            is_success = True
+        except Empty:
             output = f"代码执行失败：已超过 {timeout} 秒超时限制。代码可能包含死循环或被 'input()' 挂起。"
-        
-        elif process.exitcode == 0:
-            try:
-                output = result_queue.get(timeout=1)
-            except Exception:
-                output = "代码执行失败：子进程已退出，但未能从结果队列中获取输出。"
-        
-        else:
-            output = f"代码执行失败：子进程异常终止，退出代码: {process.exitcode}。可能是由段错误或内存溢出引起。"
-            try:
-                output += f"\n捕获到的输出：\n{result_queue.get_nowait()}"
-            except Exception:
-                pass
-    
+        process.join(timeout = 1)
     except Exception as error:
         output = f"尝试执行 Python 代码时出错: {error}"
     finally:
         if process.is_alive():
             process.terminate()
+            process.join()
         process.close()
-    
-    if verbose: 
+
+    if not is_success and process.exitcode != 0:
+        extra_info = f"代码执行失败：子进程异常终止，退出代码: {process.exitcode}。"
+        if output:
+            output = f"{extra_info}\n捕获的输出: {output}"
+        else:
+            output = extra_info
+
+    if verbose:
         print(f"--- [Python Tool Executed] ---")
         print(f"Code:\n{code}")
         print(f"Result:\n{output}")
         print(f"------------------------------")
-        
+
     return output
 
 
