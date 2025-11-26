@@ -3,6 +3,7 @@ import os
 import re
 import json
 import time
+import fitz
 import random
 import base64
 import logging
@@ -25,6 +26,8 @@ from concurrent.futures import ThreadPoolExecutor
 from collections import OrderedDict
 from pywheels import run_tasks_concurrently
 from pywheels import run_tasks_concurrently_async
+from pywheels.file_tools import get_file_paths
+from pywheels.file_tools import guarantee_file_exist
 from pywheels.miscellaneous import get_time_stamp
 
 
@@ -33,6 +36,7 @@ __all__ = [
     "os",
     "re",
     "json",
+    "fitz",
     "time",
     "wraps",
     "sleep",
@@ -55,6 +59,8 @@ __all__ = [
     "OrderedDict",
     "normalvariate",
     "ThreadPoolExecutor",
+    "get_file_paths",
+    "guarantee_file_exist",
     "run_tasks_concurrently",
     "run_tasks_concurrently_async",
 ]
