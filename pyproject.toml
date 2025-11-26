@@ -21,6 +21,7 @@ dependencies = [
     "pandas>=2.2.0",
     "scipy>=1.14.0",
     "sympy>=1.13.0",
+    "pyarrow>=22.0.0",
 ]
 
 [build-system]
