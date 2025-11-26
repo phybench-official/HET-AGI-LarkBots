@@ -12,29 +12,157 @@ image_placeholder = "<image>"
 async def parse_pdf_to_problems(
     pdf_images: List[bytes],
     contributor: str,
-)-> List[Dict[str, Any]]:
+    model: str = "Gemini-2.5-Pro",
+    temperature: float = 0.0,
+    timeout: int = 120,
+    trial_num: int = 20,
+    trial_interval: int = 5,
+) -> List[Dict[str, Any]]:
+    
+    # 随机休眠
+    sleep_time = random.uniform(5, 10)
+    await asyncio.sleep(sleep_time)
 
-    await asyncio.sleep(random.uniform(5, 10))
-    
-    # Mock 返回
-    mock_problems = [
-        {
-            "contributor": contributor,
-            "question": "如图所示 <image>，计算该粒子的衰变率。若考虑量子修正 <image>，结果有何变化？",
-            "solution": "根据费曼图分析...",
-            "answer": "42 GeV",
-            "image_placeholder": image_placeholder, 
-        },
-        {
-            "contributor": contributor,
-            "question": "计算标准模型下的黑体辐射公式。",
-            "solution": "推导如下...",
-            "answer": "见解析",
-            "image_placeholder": image_placeholder,
-        }
-    ]
-    
-    return mock_problems
+    vlm_input_placeholder = "<image_page_input>" 
+    output_image_token = "<image>"
+
+    prompt = f"""
+<system_role>
+You are a strict Physics Data Digitizer. 
+Your task is to extract physics problems from PDF page images into a structured JSON List.
+</system_role>
+
+<instruction>
+Analyze the provided images. Identify ALL independent physics problems.
+
+**1. GROUPING LOGIC:**
+- **One Dict = One Independent Problem.**
+- **Sub-questions:** If a problem has multiple parts (e.g., (1), (2)), KEEP THEM TOGETHER in a single dictionary.
+
+**2. CRITICAL RULES FOR IMAGES (NO OCR):**
+- **Strict Placeholder Usage:** When you encounter ANY diagram, figure, or graph, you MUST insert the token "{output_image_token}" exactly at that position.
+- **NO OCR / NO TRANSCRIPTION:** Do NOT try to read, transcribe, or describe text/numbers inside the image. 
+    - BAD: "As shown in the figure (where F=10N)..."
+    - GOOD: "As shown in the figure {output_image_token}..."
+- **Text Only vs Mixed:** Only the `question` field can contain image tokens. The `solution` and `answer` fields MUST BE PURE TEXT.
+
+**3. FIELD EXTRACTION RULES:**
+
+* **question** (String): 
+    - The full text of the problem stem.
+    - **Allows Images:** Insert "{output_image_token}" for diagrams.
+    - **Language:** STRICTLY maintain the original language. NO TRANSLATION.
+
+* **solution** (String):
+    - The detailed derivation/explanation.
+    - **Constraint:** **PURE TEXT ONLY.** ABSOLUTELY NO image tokens.
+    - **Missing Solution:** If not provided, set `solution` = `answer`. Do NOT hallucinate steps.
+
+* **answer** (String):
+    - The final result.
+    - **Constraint:** **PURE TEXT ONLY.** ABSOLUTELY NO image tokens.
+    - **Format:** For sub-questions, use: `(1) result1 (2) result2 ...`.
+    - **Extraction:** If not explicitly labeled, extract from the end of the solution.
+    - **Missing:** If absolutely no answer found, set to "暂无".
+
+**4. GENERAL FORMATTING:**
+- Output MUST be a valid JSON List of Objects.
+- Wrap JSON in ```json ... ``` blocks EXPLICITLY.
+- **LaTeX:** Use single `$` for inline math. Escape backslashes (e.g., `\\alpha`), **ensure successful parsing using `json.loads`**.
+</instruction>
+
+<examples>
+    <example_1>
+        <input>
+        [Question 1 with a circuit diagram. Answer is 5A.]
+        </input>
+        <output>
+        ```json
+        [
+            {{
+                "question": "Refer to the circuit diagram {output_image_token}. Calculate current.",
+                "solution": "Using Ohm's law, I = V/R...",
+                "answer": "5 A"
+            }}
+        ]
+        ```
+        <note>Question has token. Answer is pure text.</note>
+    </example_1>
+</examples>
+
+<input_context>
+Raw PDF Pages:
+{vlm_input_placeholder * len(pdf_images)}
+</input_context>
+
+Please generate the JSON List now.
+"""
+
+    final_result: List[Dict[str, Any]] = []
+
+    def check_and_accept(
+        response: str,
+    ) -> bool:
+        nonlocal final_result
+        
+        try:
+            json_pattern = r'```json\s*(.*?)\s*```'
+            matches = re.findall(json_pattern, response, re.DOTALL)
+            
+            if matches:
+                json_string = matches[0].strip()
+            else:
+                json_string = response.strip()
+
+            parsed_obj = deserialize_json(json_string)
+
+            if not isinstance(parsed_obj, list):
+                return False
+            
+            validated_list = []
+            required_keys = ["question", "solution", "answer"]
+
+            for item in parsed_obj:
+                # 键校验
+                if not all(k in item for k in required_keys):
+                    return False
+                
+                # 类型校验
+                if not all(isinstance(item[k], str) for k in required_keys):
+                    return False
+
+                # 逻辑校验：Solution 和 Answer 必须是纯文本
+                if output_image_token in item["solution"]:
+                    # print("  [Reject] Solution contains image token.")
+                    return False
+                
+                if output_image_token in item["answer"]:
+                    # print("  [Reject] Answer contains image token.")
+                    return False
+
+                item["contributor"] = contributor
+                validated_list.append(item)
+
+            final_result = validated_list
+            return True
+
+        except Exception:
+            print(f"Oh no，{model} 重试啦！调用栈：\n{traceback.format_exc()}")
+            return False
+
+    await get_answer_async(
+        prompt = prompt,
+        model = model,
+        images = pdf_images,
+        image_placeholder = vlm_input_placeholder,
+        temperature = temperature,
+        timeout = timeout,
+        trial_num = trial_num,
+        trial_interval = trial_interval,
+        check_and_accept = check_and_accept,
+    )
+
+    return final_result
 
 
 def save_problem_to_folder(
@@ -43,8 +171,7 @@ def save_problem_to_folder(
     folder_name: str,
 )-> None:
     
-    target_dir = os.path.join(base_output_dir, folder_name)
-    json_path = os.path.join(target_dir, "result.json")
+    json_path = f"{base_output_dir}{seperator}{folder_name}{seperator}result.json"
     
     guarantee_file_exist(json_path)
     
@@ -60,11 +187,20 @@ async def main():
     
     target_raw_pdfs: Dict[str, List[str]] = {}
     
-    for teacher_name in get_file_paths(input_base_path, "dirs_only", return_format="full_path"):
+    for teacher_name in get_file_paths(
+        input_base_path, 
+        file_type = "dirs_only", 
+        return_format = "full_path"
+    )[:5]:
         if teacher_name not in target_raw_pdfs:
             target_raw_pdfs[teacher_name] = []
-            
-        pdf_paths = get_file_paths(teacher_name, "files_only", ending_with=".pdf", return_format="full_path")
+        
+        pdf_paths = get_file_paths(
+            teacher_name, 
+            file_type = "files_only", 
+            ending_with = ".pdf", 
+            return_format = "full_path",
+        )
         for pdf_path in pdf_paths:
             target_raw_pdfs[teacher_name].append(pdf_path)
     

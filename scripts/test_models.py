@@ -8,6 +8,7 @@ async def main():
         "Gemini-2.5-Pro-for-HET-AGI",
         "GPT-5-for-HET-AGI",
         "Qwen-Max-for-HET-AGI",
+        "Gemini-2.5-Pro",
     ]
     
     coroutines = []
