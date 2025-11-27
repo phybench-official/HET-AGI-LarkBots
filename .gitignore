@@ -23,3 +23,6 @@ documents/
 
 # WorkingTable
 WorkingTable/
+
+# Nohup outputs
+nohup*
