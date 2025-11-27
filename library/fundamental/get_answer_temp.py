@@ -810,7 +810,7 @@ class ModelManager:
             
         raise RuntimeError(
             translate(
-                "[get_answer 报错] 所有尝试均失败！最后一次尝试的失败原因：%s"
+                f"[get_answer 报错] 所有尝试均失败！最后一次尝试的失败原因：%s\n调用栈：\n{traceback.format_exc()}"
             ) % (last_error)
         )
             

@@ -36,9 +36,9 @@ async def rollout_coroutine(
             None,                                 # top_p, use default
             None,                                 # max_completion_tokens, use default
             (minutes := 30) * 60,                 # timeout
-            20,                                   # trial_num
+            20,                                    # trial_num
             5,                                    # trial_interval
-            None,                                 # check_and_accept, no need
+            lambda _: True,                       # check_and_accept, no special needs
             tools,                                # tools
             10,                                   # tool_use_trial_num        
         ))
