@@ -96,10 +96,8 @@ def generate_report_html(
     problems: List[Dict[Hashable, Any]], 
     rollout_data: Dict[str, str], 
     eval_data: Dict[str, Dict[str, Any]],
-) -> str:
-    """生成包含 LaTeX 渲染的 HTML 报告内容"""
-
-    # MathJax 配置，用于渲染 LaTeX 公式
+)-> str:
+    
     html_header = f"""
     <!DOCTYPE html>
     <html>
@@ -134,15 +132,11 @@ def generate_report_html(
         
         score = eval_data_item["score"]
         justification = eval_data_item["justification"]
-        
-        # 判断分数级别
+
         score_class = "score-PASS" if score >= 80 else "score-FAIL"
 
         # ------------------- 图片处理 -------------------
         question_html = problem["question"]
-        
-        # 将原始问题中的图片 bytes 转换为 Base64 嵌入 HTML
-        # 假设问题中的图片是按顺序存储的
         image_bytes_list = problem.get("images", [])
         
         for i, img_bytes in enumerate(image_bytes_list):
@@ -156,7 +150,6 @@ def generate_report_html(
                 question_html = question_html.replace(problem["image_placeholder"], "[IMAGE ENCODING ERROR]", 1)
 
         # ------------------- 核心内容布局 -------------------
-        
         html_content.append(f"""
         <div class="problem">
             <div class="{score_class} score-box">分数: {score:.1f} / 100</div>
@@ -187,34 +180,17 @@ def generate_report_html(
     return html_header + "".join(html_content) + "</body></html>"
 
 
-def save_report_pdf(html_content: str, output_path: str) -> None:
-    """
-    保存 HTML 内容为 PDF。
-    注意: 此函数仅作为外部依赖的占位符。
-    
-    推荐使用 WeasyPrint 或 wkhtmltopdf (需要安装系统依赖)
-    e.g., pip install weasyprint
-    """
-    
-    # 确保输出目录存在
+def save_report_html(
+    html_content: str, 
+    output_path: str,
+)-> None:
+
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
-    # 1. 临时保存 HTML 文件
-    html_path = output_path.replace(".pdf", ".html")
-    with open(html_path, "w", encoding="utf-8") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         f.write(html_content)
     
-    # 2. 转换为 PDF (需要外部依赖，此处仅为提示)
-    print(f"\n[INFO] HTML 报告已保存至 {html_path}")
-    print(f"[ACTION REQUIRED] 请使用外部工具将该 HTML 文件转换为 PDF ({output_path})，以获得正确渲染的公式。")
-    
-    # 示例: 如果安装了 WeasyPrint，可以取消注释以下代码块
-    try:
-        from weasyprint import HTML
-        HTML(html_path).write_pdf(output_path)
-        print(f"[SUCCESS] PDF 报告已生成: {output_path}")
-    except ImportError:
-        print("[WARNING] WeasyPrint 未安装，跳过 PDF 转换。")
+    print(f"\n[INFO] HTML 报告已保存至 {output_path}")
 
 
 async def main():
@@ -235,7 +211,6 @@ async def main():
     for model in model_to_api_setting_name:
         print(f"生成模型 {model} 的报告...")
         
-        # 1. 生成 HTML 内容
         html_report = generate_report_html(
             model = model,
             problems = HET_bench_problems,
@@ -243,9 +218,9 @@ async def main():
             eval_data = eval_results[model],
         )
         
-        # 2. 保存为 PDF/HTML
-        output_pdf_path = f"documents{seperator}problems{seperator}verified_answer_sheet_{model}.pdf"
-        save_report_pdf(html_report, output_pdf_path)
+        # 后续在安装了 weasyprint 的环境中可以运行 scripts/render_html_to_pdfs.py 渲染为 pdf
+        output_pdf_path = f"documents{seperator}problems{seperator}answer_sheets{seperator}answer_sheet_{model}.html"
+        save_report_html(html_report, output_pdf_path)
 
     print("报告生成流程结束。")
 
