@@ -23,6 +23,7 @@ dependencies = [
     "sympy>=1.13.0",
     "pyarrow>=22.0.0",
     "pymupdf>=1.26.6",
+    "weasyprint>=66.0",
 ]
 
 [build-system]

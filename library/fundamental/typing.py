@@ -8,6 +8,7 @@ from typing import Union
 from typing import TypeVar
 from typing import Literal
 from typing import Callable
+from typing import Hashable
 from typing import Optional
 from typing import Awaitable
 from typing import Coroutine
@@ -24,6 +25,7 @@ __all__ = [
     "TypeVar",
     "Literal",
     "Callable",
+    "Hashable",
     "Optional",
     "Awaitable",
     "Coroutine",
