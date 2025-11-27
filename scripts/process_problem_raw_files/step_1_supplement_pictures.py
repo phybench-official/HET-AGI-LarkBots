@@ -9,4 +9,5 @@
     - 看完后在 result.json 中设置一下 reviewed: true
     - Corner cases：
         - 有的答案是“请见文章 arxiv:xxx”，这种先不过审
+        - 一题多小问的，还是没搞好
 """

@@ -6,6 +6,7 @@ import time
 import fitz
 import random
 import base64
+import hashlib
 import logging
 import asyncio
 import aiofiles
@@ -41,6 +42,7 @@ __all__ = [
     "wraps",
     "sleep",
     "random",
+    "hashlib",
     "partial",
     "base64",
     "logging",

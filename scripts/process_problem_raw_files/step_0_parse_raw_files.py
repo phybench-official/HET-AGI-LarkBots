@@ -242,6 +242,8 @@ async def main():
 
     print(f"All done. Total problems processed: {global_problem_count}")
     print(f"Please check '{output_base_path}' and manually add images.")
+    
+    print("Program OK.")
 
 
 if __name__ == "__main__":
