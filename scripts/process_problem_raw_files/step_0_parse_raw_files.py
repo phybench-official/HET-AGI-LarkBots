@@ -12,16 +12,16 @@ image_placeholder = "<image>"
 async def parse_pdf_to_problems(
     pdf_images: List[bytes],
     contributor: str,
-    model: str = "Gemini-2.5-Pro",
-    temperature: float = 0.0,
-    timeout: int = 120,
-    trial_num: int = 20,
-    trial_interval: int = 5,
 ) -> List[Dict[str, Any]]:
     
-    # 随机休眠
-    sleep_time = random.uniform(5, 10)
-    await asyncio.sleep(sleep_time)
+    model = "Gemini-2.5-Pro-for-HET-AGI"
+    temperature = 0.0
+    timeout = 600
+    trial_num = 20
+    trial_interval = 5
+    
+    # 对 yunwu 温柔一点
+    await asyncio.sleep(random.uniform(5, 10))
 
     vlm_input_placeholder = "<image_page_input>" 
     output_image_token = "<image>"
@@ -90,10 +90,9 @@ Analyze the provided images. Identify ALL independent physics problems.
     </example_1>
 </examples>
 
-<input_context>
-Raw PDF Pages:
+<input_raw_PDF_pages>
 {vlm_input_placeholder * len(pdf_images)}
-</input_context>
+</input_raw_PDF_pages>
 
 Please generate the JSON List now.
 """
@@ -141,6 +140,8 @@ Please generate the JSON List now.
                     return False
 
                 item["contributor"] = contributor
+                item["image_placeholder"] = image_placeholder
+                item["reviewed"] = False
                 validated_list.append(item)
 
             final_result = validated_list
@@ -150,7 +151,7 @@ Please generate the JSON List now.
             print(f"Oh no，{model} 重试啦！调用栈：\n{traceback.format_exc()}")
             return False
 
-    await get_answer_async(
+    _ = await get_answer_async(
         prompt = prompt,
         model = model,
         images = pdf_images,
@@ -185,64 +186,57 @@ def save_problem_to_folder(
 
 async def main():
     
-    target_raw_pdfs: Dict[str, List[str]] = {}
+    print("Step 1: Rendering PDFs and scheduling VLM tasks...")
+    
+    task_indexers = []
+    task_inputs = []
     
     for teacher_name in get_file_paths(
-        input_base_path, 
+        input_base_path,
         file_type = "dirs_only", 
-        return_format = "full_path"
-    )[:5]:
-        if teacher_name not in target_raw_pdfs:
-            target_raw_pdfs[teacher_name] = []
-        
+        return_format = "name_only",
+    ):
         pdf_paths = get_file_paths(
-            teacher_name, 
-            file_type = "files_only", 
-            ending_with = ".pdf", 
+            f"{input_base_path}{seperator}{teacher_name}", 
+            file_type = "files_only",
+            ending_with = ".pdf",
             return_format = "full_path",
         )
         for pdf_path in pdf_paths:
-            target_raw_pdfs[teacher_name].append(pdf_path)
+            print(f"  Rendering: {pdf_path}")
+            task_indexers.append(pdf_path)
+            task_inputs.append((
+                render_pdf_to_image_bytes(pdf_path, dpi=300.0),
+                teacher_name,
+            ))
     
-    vlm_tasks = []
+    print(f"\nStep 2: Firing {len(task_indexers)} VLM requests concurrently...")
     
-    print("Step 1: Rendering PDFs and scheduling VLM tasks...")
-    
-    for teacher_name, pdf_list in target_raw_pdfs.items():
-        for pdf_path in pdf_list:
-            try:
-                print(f"  Rendering: {pdf_path}")
-                pdf_images = render_pdf_to_image_bytes(pdf_path, dpi=300.0)
-
-                task = parse_pdf_to_problems(pdf_images, teacher_name)
-                vlm_tasks.append(task)
-
-            except Exception as e:
-                print(f"  [Error] Failed to render {pdf_path}: {e}")
-                continue
-    
-    print(f"\nStep 2: Firing {len(vlm_tasks)} VLM requests concurrently...")
-    
-    all_results_lists = await asyncio.gather(*vlm_tasks)
+    OCR_results = await run_tasks_concurrently_async(
+        task = parse_pdf_to_problems,
+        task_indexers = task_indexers,
+        task_inputs = task_inputs,
+        local_storage_path = "WorkingTable/local_storage/process_problems_step_0.pickle",
+        checkpoint_threshold = 1,
+        # max_workers = 50,
+        # lazy = False,
+    )
     
     print("\nStep 3: Saving results...")
     
     global_problem_count = 0
-    teacher_counters: Dict[str, int] = {} 
+    teacher_counters: Dict[str, int] = {}
     
-    for problems_list in all_results_lists:
-        for problem in problems_list:
-            teacher_name = problem["contributor"]
-            
+    for pdf_path, (_, teacher_name) in zip(task_indexers, task_inputs):
+        problems = OCR_results[pdf_path]
+        for problem in problems:
             current_idx = teacher_counters.get(teacher_name, 0)
             folder_name = f"{teacher_name}_{str(current_idx).zfill(3)}"
-            
             save_problem_to_folder(
                 problem_data = problem, 
-                base_output_dir = output_base_path, 
+                base_output_dir = output_base_path,
                 folder_name = folder_name, 
             )
-            
             teacher_counters[teacher_name] = current_idx + 1
             global_problem_count += 1
 
@@ -251,5 +245,5 @@ async def main():
 
 
 if __name__ == "__main__":
-    
+
     asyncio.run(main())

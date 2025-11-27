@@ -14,6 +14,7 @@ def save_to_json(
     obj: Any,
     file_path: str,
     encoding: str = "UTF-8",
+    ensure_ascii: bool = False,
 )-> None:
     
     with open(
@@ -21,7 +22,7 @@ def save_to_json(
         mode = "w",
         encoding = encoding,
     ) as file_pointer:
-        json.dump(obj, file_pointer)
+        json.dump(obj, file_pointer, ensure_ascii=ensure_ascii)
 
 
 def load_from_json(
