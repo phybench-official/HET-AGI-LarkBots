@@ -12,8 +12,21 @@ print("HET bench 题目已加载完成！")
 
 
 model_to_api_setting_name = {
-    # "Gemini-2.5-Pro": "Gemini-2.5-Pro-for-HET-AGI",
     "GPT-5": "GPT-5-for-HET-AGI",
+    "GPT-4o": "GPT-4o-for-HET-AGI",
+    "O3": "O3-for-HET-AGI",
+    "O4-mini": "O4-mini-for-HET-AGI",
+    "Gemini-2.5-Pro": "Gemini-2.5-Pro-for-HET-AGI",
+    "Gemini-2.5-Flash": "Gemini-2.5-Flash-for-HET-AGI",
+    "Grok-4.1-thinking": "Grok-4.1-thinking-for-HET-AGI",
+    "Grok-3": "Grok-3-for-HET-AGI",
+    "Qwen-Max": "Qwen-Max-for-HET-AGI",
+    "Qwen-Plus": "Qwen-Plus-for-HET-AGI",
+    "Doubao-Seed-1.6-thinking": "Doubao-Seed-1.6-thinking-for-HET-AGI",
+    "Deepseek-R1": "Deepseek-R1-for-HET-AGI",
+    "Deepseek-V3": "Deepseek-V3-for-HET-AGI",
+    "GLM-4.5": "GLM-4.5-for-HET-AGI",
+    "Claude-Sonnet-4.5-thinking": "Claude-Sonnet-4.5-thinking-for-HET-AGI",
 }
 
 
@@ -24,6 +37,8 @@ visualize_answer_sheet_whitelist = [
     "Gemini-2.5-Pro",
     "GPT-5",
     "Qwen-Max",
+    "Grok-4.1-thinking",
+    "Doubao-Seed-1.6-thinking",
 ]
 
 
@@ -198,6 +213,10 @@ async def upload_model_answer_sheet(
                 batch_content += lark_bot.divider_placeholder
             batch_content += lark_bot.begin_of_second_heading
             batch_content += f"题目 {index + batch_index + 1}"
+            if abs(score - 100.0) < 1e-5:
+                batch_content += " [满分]"
+            if abs(score - 0.0) < 1e-5:
+                batch_content += " [零分]"
             batch_content += lark_bot.end_of_second_heading
             batch_content += lark_bot.begin_of_third_heading
             batch_content += "题目"
@@ -257,7 +276,7 @@ async def upload_model_answer_sheet(
     document_block_images_list.insert(0, [])
     
     for blocks, block_images in tqdm(
-        zip(document_blocks_list, document_block_images_list),
+        list(zip(document_blocks_list, document_block_images_list)),
         desc = f"{model} 作答的题目分批上传中...",
     ):
         await lark_bot.append_document_blocks_async(
@@ -304,6 +323,28 @@ async def main():
         except Exception:
             print(f"上传 {model} Answer Sheet 出错啦！调用栈：\n{traceback.format_exc()}")     
     PKU_PHY_fermion_for_testing.shutdown()
+    
+    print("\n" + "="*40)
+    print("HET Bench Leaderboard")
+    print("="*40)
+    
+    leaderboard = []
+    for model in model_to_api_setting_name:
+        if model not in eval_results:
+            continue
+        scores = []
+        for q_id, result in eval_results[model].items():
+            if isinstance(result, dict) and "score" in result:
+                scores.append(result["score"])
+        if scores:
+            avg_score = sum(scores) / len(scores)
+            leaderboard.append((model, avg_score))
+    leaderboard.sort(key=lambda x: x[1], reverse=True)
+    print(f"{'Rank':<5} | {'Model Name':<30} | {'Score':<6}")
+    print("-" * 48)
+    for rank, (model_name, score) in enumerate(leaderboard, 1):
+        print(f"{rank:<5} | {model_name:<30} | {score:.1f}")
+    print("="*40 + "\n")
     
     print("Program OK.")
 
