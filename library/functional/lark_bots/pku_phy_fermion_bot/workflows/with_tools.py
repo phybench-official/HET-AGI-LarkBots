@@ -3,11 +3,12 @@ from ..equation_rendering import *
 
 
 __all__ = [
+    "HET_problem_system_prompt_with_tool",
     "with_tools_func_factory",
 ]
 
 
-system_prompt_for_physics_problems = """
+HET_problem_system_prompt_with_tool = """
 你是一位严谨的科学家。请遵循以下原则解答问题，给出详细的解题过程：
 1. **思维原子化**：将解题步骤拆解为不可再分的最小逻辑单元，严禁跳跃步骤；
 2. **溯源与说理**：每一步推导必须基于公认的基础原理或定理，拒绝直接引用的小众公式或二级结论；
@@ -95,7 +96,7 @@ def with_tools_func_factory(
         raw_response = await get_answer_async(
             prompt = problem_text,
             model = lark_bot._config["workflows"]["with_tools"][model]["model"],
-            system_prompt = system_prompt_for_physics_problems,
+            system_prompt = HET_problem_system_prompt_with_tool,
             images = problem_images,
             image_placeholder = lark_bot.image_placeholder,
             temperature = lark_bot._config["workflows"]["with_tools"][model]["temperature"],

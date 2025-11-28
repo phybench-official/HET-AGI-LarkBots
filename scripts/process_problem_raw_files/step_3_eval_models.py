@@ -91,106 +91,156 @@ async def eval_coroutine(
     return None
 
 
-def generate_report_html(
-    model: str, 
-    problems: List[Dict[Hashable, Any]], 
-    rollout_data: Dict[str, str], 
-    eval_data: Dict[str, Dict[str, Any]],
-)-> str:
-    
-    html_header = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>HET Bench Evaluation Report - {model}</title>
-        <script type="text/javascript" async
-          src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js">
-        </script>
-        <style>
-            body {{ font-family: Arial, sans-serif; margin: 20px; }}
-            .problem {{ border: 2px solid #ccc; padding: 15px; margin-bottom: 20px; border-radius: 8px; }}
-            .section {{ margin-top: 10px; padding-left: 10px; border-left: 4px solid #eee; }}
-            .question-text {{ font-weight: bold; margin-bottom: 5px; }}
-            .score-box {{ float: right; padding: 8px; font-size: 1.2em; font-weight: bold; border-radius: 5px; }}
-            .score-PASS {{ background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }}
-            .score-FAIL {{ background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }}
-            .justification {{ font-style: italic; color: #666; margin-top: 5px; }}
-            img {{ max-width: 100%; height: auto; margin: 10px 0; border: 1px solid #ddd; }}
-        </style>
-    </head>
-    <body>
-    <h1>HET Bench 评测报告 - {model}</h1>
-    <h2>总计题目数: {len(problems)}</h2>
-    """
-
-    html_content = []
-    
-    for problem in problems:
-        q_id = problem["question_id"]
-        response_text = rollout_data.get(q_id, "【ROLLOUT FAILED】")
-        eval_data_item = eval_data.get(q_id, {"score": 0.0, "justification": "Evaluation Failed or Timeout."})
-        
-        score = eval_data_item["score"]
-        justification = eval_data_item["justification"]
-
-        score_class = "score-PASS" if score >= 80 else "score-FAIL"
-
-        # ------------------- 图片处理 -------------------
-        question_html = problem["question"]
-        image_bytes_list = problem.get("images", [])
-        
-        for i, img_bytes in enumerate(image_bytes_list):
-            try:
-                base64_img = base64.b64encode(img_bytes).decode('utf-8')
-                img_tag = f'<img src="data:image/png;base64,{base64_img}" alt="Diagram {i+1}">'
-                # 替换问题中的占位符 <image> 为实际图片
-                question_html = question_html.replace(problem["image_placeholder"], img_tag, 1)
-            except Exception:
-                # 图像编码失败时，保留占位符或提示错误
-                question_html = question_html.replace(problem["image_placeholder"], "[IMAGE ENCODING ERROR]", 1)
-
-        # ------------------- 核心内容布局 -------------------
-        html_content.append(f"""
-        <div class="problem">
-            <div class="{score_class} score-box">分数: {score:.1f} / 100</div>
-            <h3>问题 ID: {q_id}</h3>
-            
-            <div class="section">
-                <h4>原始题目 (Q)</h4>
-                <div class="question-text">{question_html}</div>
-            </div>
-
-            <div class="section">
-                <h4>标准答案 (A)</h4>
-                <div>{problem["answer"]}</div>
-            </div>
-            
-            <div class="section">
-                <h4>模型输出 (R)</h4>
-                <pre>{response_text}</pre>
-            </div>
-            
-            <div class="section">
-                <h4>裁判判分意见</h4>
-                <div class="justification">{justification}</div>
-            </div>
-        </div>
-        """)
-
-    return html_header + "".join(html_content) + "</body></html>"
-
-
-def save_report_html(
-    html_content: str, 
-    output_path: str,
+async def upload_model_answer_sheet(
+    model: str,
+    lark_bot: LarkBot,
 )-> None:
-
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write(html_content)
+    print(f"上传 {model} 的 Answer sheet 中...")
     
-    print(f"\n[INFO] HTML 报告已保存至 {output_path}")
+    task_indexers = []
+    task_inputs = []
+    for problem in HET_bench_problems:
+        question_id = problem["question_id"]
+        question = problem["question"]
+        solution = problem["solution"]
+        answer = problem["answer"]
+        response = rollout_results[model][question_id]
+        eval_result = eval_results[model][question_id]
+        justification = eval_result["justification"]
+        task_indexers.extend([
+            (question_id, attribute)
+            for attribute in ["question", "solution", "answer", "response", "justification"]
+        ])
+        task_inputs.extend([
+            (question, ), (solution, ), (answer, ), 
+            (response, ), (justification, ), 
+        ])
+    
+    _render_equation = partial(
+        render_equation_async,
+        begin_of_equation = lark_bot.begin_of_equation,
+        end_of_equation = lark_bot.end_of_equation,
+        model = "Qwen-Max-for-HET-AGI",
+        temperature = 0.0,
+        timeout = 300,
+        trial_num = 20,
+        trial_interval = 5,
+    )
+    render_results = await run_tasks_concurrently_async(
+        task = _render_equation,
+        task_indexers = task_indexers,
+        task_inputs = task_inputs,
+        progress_bar_description = "文档组件渲染中...",
+        local_storage_path = f"WorkingTable{seperator}local_storage{seperator}render_results{seperator}{model}.pickle",
+        checkpoint_threshold = 1,
+    )
+    
+    document_title = f"HET-bench Answer Sheet of {model}"
+    document_id = await lark_bot.create_document_async(
+        title = document_title,
+        folder_token = lark_bot._config["WorkingTable_folder_token"],
+    )
+    document_url = get_lark_document_url(
+        tenant = lark_bot._config["association_tenant"],
+        document_id = document_id,
+    )
+    print(f"飞书云文档 {document_title} 已创建：{document_url}")
+    
+    batch_size = 3
+    scores = [
+        eval_results[model][problem["question_id"]]["score"]
+        for problem in HET_bench_problems
+    ]
+    average_score = sum(scores) / len(scores)
+    heading_content = ""
+    heading_content += lark_bot.begin_of_first_heading
+    heading_content += "整体情况"
+    heading_content += lark_bot.end_of_first_heading
+    heading_content += f"{lark_bot.begin_of_bold}题目总数{lark_bot.end_of_bold}：{len(HET_bench_problems)}"
+    heading_content += f"{lark_bot.begin_of_bold}{model} 均分{lark_bot.end_of_bold}：{average_score:.1f}"
+    heading_content += lark_bot.begin_of_first_heading
+    heading_content += "答卷细则"
+    heading_content += lark_bot.end_of_first_heading
+    heading_blocks = lark_bot.build_document_blocks(
+        content = heading_content,
+    )
+    await lark_bot.append_document_blocks_async(
+        document_id = document_id,
+        blocks = heading_blocks,
+        images = [],
+    )
+    for index in tqdm(
+        range(0, len(HET_bench_problems), batch_size),
+        desc = f"{model} 作答的题目分批上传中...",
+    ):
+        batch_content = ""
+        problems = HET_bench_problems[index : index + batch_size]
+        batch_images = []
+        for batch_index, problem in enumerate(problems):
+            
+            question_id = problem["question_id"]
+            rendered_question = render_results[(question_id, "question")]
+            rendered_solution = render_results[(question_id, "solution")]
+            rendered_answer = render_results[(question_id, "answer")]
+            rendered_response = render_results[(question_id, "response")]
+            eval_result = eval_results[model][question_id]
+            score = eval_result["score"]
+            rendered_justification = render_results[(question_id, "justification")]
+            
+            original_image_placeholder = problem["image_placeholder"]
+            problem_images = problem["images"]
+            if rendered_question.count(original_image_placeholder) == len(problem_images):
+                rendered_question = rendered_question.replace(original_image_placeholder, lark_bot.image_placeholder)
+            else:
+                rendered_question = rendered_question.replace(original_image_placeholder, "") \
+                            + len(problem_images) * lark_bot.image_placeholder
+                            
+            batch_images.extend(problem_images)
+            if batch_index or index:
+                batch_content += lark_bot.divider_placeholder
+            batch_content += lark_bot.begin_of_second_heading
+            batch_content += f"题目 {index + batch_index + 1}"
+            batch_content += lark_bot.end_of_second_heading
+            batch_content += lark_bot.begin_of_third_heading
+            batch_content += "题目"
+            batch_content += lark_bot.end_of_third_heading
+            batch_content += rendered_question
+            batch_content += lark_bot.begin_of_third_heading
+            batch_content += "参考解答"
+            batch_content += lark_bot.end_of_third_heading
+            batch_content += rendered_solution
+            batch_content += lark_bot.begin_of_third_heading
+            batch_content += "参考答案"
+            batch_content += lark_bot.end_of_third_heading
+            batch_content += rendered_answer
+            batch_content += lark_bot.begin_of_third_heading
+            batch_content += "AI 解答"
+            batch_content += lark_bot.end_of_third_heading
+            batch_content += rendered_response
+            batch_content += lark_bot.begin_of_third_heading
+            batch_content += "AI 裁判员打分"
+            batch_content += lark_bot.end_of_third_heading
+            batch_content += lark_bot.begin_of_forth_heading
+            batch_content += "分数"
+            batch_content += lark_bot.end_of_forth_heading
+            batch_content += f"{score:.1f}"
+            batch_content += lark_bot.begin_of_forth_heading
+            batch_content += "评分依据"
+            batch_content += lark_bot.end_of_forth_heading
+            batch_content += rendered_justification
+            
+        batch_blocks = lark_bot.build_document_blocks(
+            content = batch_content,
+        )
+        await lark_bot.append_document_blocks_async(
+            document_id = document_id,
+            blocks = batch_blocks,
+            images = batch_images,
+        )
+        await asyncio.sleep(random.uniform(0.4, 0.6))
+    
+    print(f"{model} 的 Answer sheet 已上传完毕！")
 
 
 async def main():
@@ -207,24 +257,23 @@ async def main():
     await asyncio.gather(*list(eval_coroutines.values()))
     print(f"所有模型的 eval 任务已完成！")
     
-    print("--- 启动报告生成 ---")
+    PKU_PHY_fermion_for_testing = PkuPhyFermionBot(
+        config_path = f"configs/pku_phy_fermion_config_for_testing.yaml",
+    )
+    PKU_PHY_fermion_for_testing.start()
+    
     for model in model_to_api_setting_name:
-        print(f"生成模型 {model} 的报告...")
-        
-        html_report = generate_report_html(
+        await upload_model_answer_sheet(
             model = model,
-            problems = HET_bench_problems,
-            rollout_data = rollout_results[model],
-            eval_data = eval_results[model],
+            lark_bot = PKU_PHY_fermion_for_testing,
         )
-        
-        # 后续在安装了 weasyprint 的环境中可以运行 scripts/render_html_to_pdfs.py 渲染为 pdf
-        output_pdf_path = f"documents{seperator}problems{seperator}answer_sheets{seperator}answer_sheet_{model}.html"
-        save_report_html(html_report, output_pdf_path)
-
-    print("报告生成流程结束。")
 
 
 if __name__ == "__main__":
+    
+    try:
+        multiprocessing.set_start_method("spawn")
+    except RuntimeError:
+        pass
     
     asyncio.run(main())

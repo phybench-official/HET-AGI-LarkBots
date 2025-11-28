@@ -840,29 +840,6 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
                 reply_in_thread = False,
             )
             return None
-        
-        elif command == "/upload":
-            try:
-                local_path = args[1]
-                document_title = args[2]
-            except:
-                await self.reply_message_async(
-                    response = f"用法：/upload <local_path> <document_title>",
-                    message_id = message_id,
-                    reply_in_thread = False,
-                )
-                return None
-            
-            await self.reply_message_async(
-                response = f"正在上传本地文件 {local_path}，请稍候...",
-                message_id = message_id,
-            )
-            
-            await self.reply_message_async(
-                response = f"文件 {local_path} 已上传至 {self.begin_of_hyperlink}Mock Document{self.end_of_hyperlink}",
-                message_id = message_id,
-                hyperlinks = ["https://www.bilibili.com"],
-            )
 
         else:
             await self.reply_message_async(f"错误: 未知指令 '{command}'", message_id)

@@ -15,6 +15,7 @@ import threading
 import binascii
 import contextlib
 import multiprocessing
+from tqdm import tqdm
 from time import sleep
 from copy import deepcopy
 from functools import wraps
@@ -39,6 +40,7 @@ __all__ = [
     "json",
     "fitz",
     "time",
+    "tqdm",
     "wraps",
     "sleep",
     "random",
