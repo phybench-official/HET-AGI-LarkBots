@@ -12,12 +12,19 @@ print("HET bench 题目已加载完成！")
 
 
 model_to_api_setting_name = {
-    "Gemini-2.5-Pro": "Gemini-2.5-Pro-for-HET-AGI",
-    # "GPT-5": "GPT-5-for-HET-AGI",
+    # "Gemini-2.5-Pro": "Gemini-2.5-Pro-for-HET-AGI",
+    "GPT-5": "GPT-5-for-HET-AGI",
 }
 
 
 tools = []
+
+
+visualize_answer_sheet_whitelist = [
+    "Gemini-2.5-Pro",
+    "GPT-5",
+    "Qwen-Max",
+]
 
 
 rollout_coroutines = {}
@@ -33,18 +40,19 @@ async def rollout_coroutine(
         task_inputs.append((
             problem["question"],                  # prompt
             model_to_api_setting_name[model],     # model
-            problem["system_prompt"],             # system_prompt
+            # problem["system_prompt"],             # system_prompt
+            HET_problem_system_prompt,            # system_prompt
             problem["images"],                    # images
             problem["image_placeholder"],         # image_placeholder
             None,                                 # temperature, use default
             None,                                 # top_p, use default
             None,                                 # max_completion_tokens, use default
             (minutes := 30) * 60,                 # timeout
-            20,                                    # trial_num
+            20,                                   # trial_num
             5,                                    # trial_interval
             lambda _: True,                       # check_and_accept, no special needs
             tools,                                # tools
-            10,                                   # tool_use_trial_num        
+            10,                                   # tool_use_trial_num      
         ))
     
     rollout_result = await run_tasks_concurrently_async(
@@ -194,6 +202,7 @@ async def upload_model_answer_sheet(
             batch_content += lark_bot.begin_of_third_heading
             batch_content += "题目"
             batch_content += lark_bot.end_of_third_heading
+            batch_content += f"{lark_bot.begin_of_bold}题目贡献者{lark_bot.end_of_bold}：{problem['contributor']}老师\n"
             batch_content += rendered_question
             batch_content += lark_bot.begin_of_third_heading
             batch_content += "参考解答"
@@ -280,6 +289,9 @@ async def main():
     )
     PKU_PHY_fermion_for_testing.start()
     for model in model_to_api_setting_name:
+        if model not in visualize_answer_sheet_whitelist:
+            print(f"跳过模型 {model}，不整理其 Answer Sheet")
+            continue
         try:
             await run_tasks_concurrently_async(
                 task = upload_model_answer_sheet,
