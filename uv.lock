@@ -881,7 +881,7 @@ requires-dist = [
     { name = "pyarrow", specifier = ">=22.0.0" },
     { name = "pymupdf", specifier = ">=1.26.6" },
     { name = "python-dotenv", specifier = ">=1.2.1" },
-    { name = "pywheels", specifier = ">=0.8.3" },
+    { name = "pywheels", specifier = "==0.8.3.1" },
     { name = "requests", specifier = ">=2.31.0" },
     { name = "ruamel-yaml", specifier = ">=0.18.0" },
     { name = "scipy", specifier = ">=1.14.0" },
@@ -2499,7 +2499,7 @@ wheels = [
 
 [[package]]
 name = "pywheels"
-version = "0.8.3"
+version = "0.8.3.1"
 source = { registry = "https://mirrors.pku.edu.cn/pypi/web/simple" }
 dependencies = [
     { name = "aiofiles" },
@@ -2512,9 +2512,9 @@ dependencies = [
     { name = "scipy", version = "1.15.3", source = { registry = "https://mirrors.pku.edu.cn/pypi/web/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy", version = "1.16.3", source = { registry = "https://mirrors.pku.edu.cn/pypi/web/simple" }, marker = "python_full_version >= '3.11'" },
 ]
-sdist = { url = "https://mirrors.pku.edu.cn/pypi/web/packages/30/c6/091f549053518d29d54edef04518b5bae98b6362435dfb028c8384968c0b/pywheels-0.8.3.tar.gz", hash = "sha256:b70d8f89ae6d2f49314ef34c46dcea4ba66a2672ce010211e5f2655960835d84" }
+sdist = { url = "https://mirrors.pku.edu.cn/pypi/web/packages/b0/15/3f688fb0469efc0b53577f6531dca3269e4861d62e2ebe4238dd2a66e62f/pywheels-0.8.3.1.tar.gz", hash = "sha256:26bac19f8018d77b89eb4957a711e6f4910e5718c6d3d26ccdf3f9aad3a435e9" }
 wheels = [
-    { url = "https://mirrors.pku.edu.cn/pypi/web/packages/04/28/e526fc70a16dc36d630dabe432b3583152173f3c09cb9ae2f7748f398b0c/pywheels-0.8.3-py3-none-any.whl", hash = "sha256:343b0ca3b4b01770ee562d1227803974d000b6b95e2fe920077ea11e91eddf96" },
+    { url = "https://mirrors.pku.edu.cn/pypi/web/packages/33/8e/13f8fa9bfa152de5e90225120cfb64c50d83299dc77e1dacd16ba1dc9ece/pywheels-0.8.3.1-py3-none-any.whl", hash = "sha256:d45012478b2e105584adde62bee6a79cb7c4e08a531fcc3acadcb2b8f30d02d5" },
 ]
 
 [[package]]

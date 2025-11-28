@@ -11,7 +11,7 @@ dependencies = [
     "lark-oapi>=1.0.0",
     "openai>=1.0.0",
     "python-dotenv>=1.2.1",
-    "pywheels>=0.8.3",
+    "pywheels==0.8.3.1",
     "requests>=2.31.0",
     "ruamel.yaml>=0.18.0",
     "supabase>=2.24.0",

@@ -1,6 +1,9 @@
 from library import *
 
 
+lazy_render = True
+
+
 print("正在加载 HET bench 题目...")
 input_path = "documents/problems/final_QAs/HET_bench.parquet"
 _HET_bench_problems = load_from_parquet(input_path)
@@ -10,7 +13,7 @@ print("HET bench 题目已加载完成！")
 
 model_to_api_setting_name = {
     "Gemini-2.5-Pro": "Gemini-2.5-Pro-for-HET-AGI",
-    "GPT-5": "GPT-5-for-HET-AGI",
+    # "GPT-5": "GPT-5-for-HET-AGI",
 }
 
 
@@ -131,9 +134,10 @@ async def upload_model_answer_sheet(
         task = _render_equation,
         task_indexers = task_indexers,
         task_inputs = task_inputs,
-        progress_bar_description = "文档组件渲染中...",
-        local_storage_path = f"WorkingTable{seperator}local_storage{seperator}render_results{seperator}{model}.pickle",
+        progress_bar_description = f"{model} Answer Sheet 组件渲染中...",
+        local_storage_path = f"WorkingTable{seperator}local_storage{seperator}upload_results{seperator}render_components_results{seperator}{model}.pickle",
         checkpoint_threshold = 1,
+        lazy = lazy_render,
     )
     
     document_title = f"HET-bench Answer Sheet of {model}"
@@ -148,31 +152,12 @@ async def upload_model_answer_sheet(
     print(f"飞书云文档 {document_title} 已创建：{document_url}")
     
     batch_size = 3
-    scores = [
-        eval_results[model][problem["question_id"]]["score"]
-        for problem in HET_bench_problems
-    ]
-    average_score = sum(scores) / len(scores)
-    heading_content = ""
-    heading_content += lark_bot.begin_of_first_heading
-    heading_content += "整体情况"
-    heading_content += lark_bot.end_of_first_heading
-    heading_content += f"{lark_bot.begin_of_bold}题目总数{lark_bot.end_of_bold}：{len(HET_bench_problems)}"
-    heading_content += f"{lark_bot.begin_of_bold}{model} 均分{lark_bot.end_of_bold}：{average_score:.1f}"
-    heading_content += lark_bot.begin_of_first_heading
-    heading_content += "答卷细则"
-    heading_content += lark_bot.end_of_first_heading
-    heading_blocks = lark_bot.build_document_blocks(
-        content = heading_content,
-    )
-    await lark_bot.append_document_blocks_async(
-        document_id = document_id,
-        blocks = heading_blocks,
-        images = [],
-    )
-    for index in tqdm(
-        range(0, len(HET_bench_problems), batch_size),
-        desc = f"{model} 作答的题目分批上传中...",
+    available_problem_count = 0
+    document_blocks_list = []
+    document_block_images_list = []
+    for index in (
+        range(0, len(HET_bench_problems), batch_size)
+        # range(0, 2 * batch_size, batch_size)
     ):
         batch_content = ""
         problems = HET_bench_problems[index : index + batch_size]
@@ -180,13 +165,17 @@ async def upload_model_answer_sheet(
         for batch_index, problem in enumerate(problems):
             
             question_id = problem["question_id"]
-            rendered_question = render_results[(question_id, "question")]
-            rendered_solution = render_results[(question_id, "solution")]
-            rendered_answer = render_results[(question_id, "answer")]
-            rendered_response = render_results[(question_id, "response")]
-            eval_result = eval_results[model][question_id]
-            score = eval_result["score"]
-            rendered_justification = render_results[(question_id, "justification")]
+            try:
+                rendered_question = render_results[(question_id, "question")]
+                rendered_solution = render_results[(question_id, "solution")]
+                rendered_answer = render_results[(question_id, "answer")]
+                rendered_response = render_results[(question_id, "response")]
+                eval_result = eval_results[model][question_id]
+                score = eval_result["score"]
+                rendered_justification = render_results[(question_id, "justification")]
+                available_problem_count += 1
+            except:
+                continue
             
             original_image_placeholder = problem["image_placeholder"]
             problem_images = problem["images"]
@@ -230,13 +219,42 @@ async def upload_model_answer_sheet(
             batch_content += lark_bot.end_of_forth_heading
             batch_content += rendered_justification
             
+        
         batch_blocks = lark_bot.build_document_blocks(
             content = batch_content,
         )
+        document_blocks_list.append(batch_blocks)
+        document_block_images_list.append(batch_images)
+        
+    scores = [
+        eval_results[model][problem["question_id"]]["score"]
+        for problem in HET_bench_problems
+    ]
+    average_score = sum(scores) / len(scores)
+    heading_content = ""
+    heading_content += lark_bot.begin_of_first_heading
+    heading_content += "整体情况"
+    heading_content += lark_bot.end_of_first_heading
+    heading_content += f"{lark_bot.begin_of_bold}题目总数{lark_bot.end_of_bold}：{available_problem_count}"
+    heading_content += "\n"
+    heading_content += f"{lark_bot.begin_of_bold}{model} 均分{lark_bot.end_of_bold}：{average_score:.1f}"
+    heading_content += lark_bot.begin_of_first_heading
+    heading_content += "答卷细则"
+    heading_content += lark_bot.end_of_first_heading
+    heading_blocks = lark_bot.build_document_blocks(
+        content = heading_content,
+    )
+    document_blocks_list.insert(0, heading_blocks)
+    document_block_images_list.insert(0, [])
+    
+    for blocks, block_images in tqdm(
+        zip(document_blocks_list, document_block_images_list),
+        desc = f"{model} 作答的题目分批上传中...",
+    ):
         await lark_bot.append_document_blocks_async(
             document_id = document_id,
-            blocks = batch_blocks,
-            images = batch_images,
+            blocks = blocks,
+            images = block_images,
         )
         await asyncio.sleep(random.uniform(0.4, 0.6))
     
@@ -261,12 +279,21 @@ async def main():
         config_path = f"configs/pku_phy_fermion_config_for_testing.yaml",
     )
     PKU_PHY_fermion_for_testing.start()
-    
     for model in model_to_api_setting_name:
-        await upload_model_answer_sheet(
-            model = model,
-            lark_bot = PKU_PHY_fermion_for_testing,
-        )
+        try:
+            await run_tasks_concurrently_async(
+                task = upload_model_answer_sheet,
+                task_indexers = [model],
+                task_inputs = [(model, PKU_PHY_fermion_for_testing)],
+                progress_bar_description = f"{model} Answer Sheet 上传中...",
+                local_storage_path = f"WorkingTable{seperator}local_storage{seperator}upload_results{seperator}{model}.pickle",
+                checkpoint_threshold = 1,
+            )
+        except Exception:
+            print(f"上传 {model} Answer Sheet 出错啦！调用栈：\n{traceback.format_exc()}")     
+    PKU_PHY_fermion_for_testing.shutdown()
+    
+    print("Program OK.")
 
 
 if __name__ == "__main__":

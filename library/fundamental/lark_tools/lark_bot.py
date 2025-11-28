@@ -124,9 +124,6 @@ class LarkBot:
     append_document_blocks_backoff_seconds = [1.0] * 32 + [2.0] * 32 + [4.0] * 32 + [8.0] * 32
     delete_file_backoff_seconds = [1.0] * 32 + [2.0] * 32 + [4.0] * 32 + [8.0] * 32
     
-    _spawned_processes: List[multiprocessing.Process] = []
-    _process_lock: threading.Lock = threading.Lock()
-    
     def __init__(
         self,
         config_path: str,
@@ -156,10 +153,9 @@ class LarkBot:
             level = lark.LogLevel.DEBUG,
         )
         
-        # TODO: 改造这里，使之支持加粗（bold）
-        # 并且正则的编译移到类公有的里面，使得避免不同类反复编译
-        
-        
+        self._spawned_processes: List[multiprocessing.Process] = []
+        self._process_lock: threading.Lock = threading.Lock()
+
         self._image_cache_size = image_cache_size
         self._image_cache: OrderedDict[str, bytes] = OrderedDict()
         self._image_cache_lock = asyncio.Lock()
@@ -279,6 +275,22 @@ class LarkBot:
                 print("[Main] All processes terminated.")
         else:
             return
+        
+        
+    def shutdown(
+        self,
+    )-> None:
+        
+        print(f"[Main] Stopping processes for {self._config['name']}...")
+        with self._process_lock:
+            for process in self._spawned_processes:
+                if process.is_alive():
+                    print(f"[Main] Terminating process {process.pid}...")
+                    process.terminate()
+            for process in self._spawned_processes:
+                process.join()
+            self._spawned_processes.clear()
+        print("[Main] All associated processes stopped.")
     
     
     def register_message_receive(
