@@ -39,18 +39,20 @@ Analyze the provided images. Identify ALL independent physics problems.
 - **One Dict = One Independent Problem.**
 - **Sub-questions:** If a problem has multiple parts (e.g., (1), (2)), KEEP THEM TOGETHER in a single dictionary.
 
-**2. CRITICAL RULES FOR IMAGES (NO OCR):**
-- **Strict Placeholder Usage:** When you encounter ANY diagram, figure, or graph, you MUST insert the token "{output_image_token}" exactly at that position.
-- **NO OCR / NO TRANSCRIPTION:** Do NOT try to read, transcribe, or describe text/numbers inside the image. 
-    - BAD: "As shown in the figure (where F=10N)..."
-    - GOOD: "As shown in the figure {output_image_token}..."
-- **Text Only vs Mixed:** Only the `question` field can contain image tokens. The `solution` and `answer` fields MUST BE PURE TEXT.
+**2. CRITICAL RULES: IMAGES vs. FORMULAS:**
+- **FORMULAS -> OCR (LaTeX):** Do **NOT** use image placeholders for mathematical formulas, equations, or expressions, even if they appear as block elements. You **MUST** transcribe them into LaTeX (e.g., `$$E = mc^2$$`).
+- **DIAGRAMS/TABLES -> Placeholder:** Only use the token "{output_image_token}" for:
+    1. **Geometric Diagrams / Illustrations** (e.g., circuits, free-body diagrams).
+    2. **Data Plots / Graphs** (e.g., v-t graph).
+    3. **Tables** (grids of data).
+- **NO OCR inside Diagrams:** Do not describe the visual content of a diagram (e.g., do not write "A circle with radius R"). Just put "{output_image_token}".
 
 **3. FIELD EXTRACTION RULES:**
 
 * **question** (String): 
     - The full text of the problem stem.
-    - **Allows Images:** Insert "{output_image_token}" for diagrams.
+    - **Prefix Cleaning:** **REMOVE** meta-labels at the start, such as "Problem 1:", "Q1.", "1.", "【题目】", or "Example:". Start directly with the meaningful content.
+    - **Allows Images:** Insert "{output_image_token}" for diagrams/tables.
     - **Language:** STRICTLY maintain the original language. NO TRANSLATION.
 
 * **solution** (String):
@@ -68,25 +70,27 @@ Analyze the provided images. Identify ALL independent physics problems.
 **4. GENERAL FORMATTING:**
 - Output MUST be a valid JSON List of Objects.
 - Wrap JSON in ```json ... ``` blocks EXPLICITLY.
-- **LaTeX:** Use single `$` for inline math. Escape backslashes (e.g., `\\alpha`), **ensure successful parsing using `json.loads`**.
+- **LaTeX:** Use single `$` for inline math. Escape backslashes (e.g., `\\alpha` -> `\\\\alpha` in JSON string), **ensure successful parsing using `json.loads`**.
 </instruction>
 
 <examples>
     <example_1>
         <input>
-        [Question 1 with a circuit diagram. Answer is 5A.]
+        [Text: "Problem 1: Calculate the flux."]
+        [Image: A solenoid diagram]
+        [Text: "Given $\\Phi = B \\cdot A$."]
         </input>
         <output>
         ```json
         [
             {{
-                "question": "Refer to the circuit diagram {output_image_token}. Calculate current.",
-                "solution": "Using Ohm's law, I = V/R...",
-                "answer": "5 A"
+                "question": "Calculate the flux. Refer to the solenoid {output_image_token}.",
+                "solution": "We know that $\\Phi = B \\cdot A$. Integrating over the surface...",
+                "answer": "42 Wb"
             }}
         ]
         ```
-        <note>Question has token. Answer is pure text.</note>
+        <note>Prefix "Problem 1:" removed. Formula "Phi = B A" is OCR'd as LaTeX. Diagram is replaced by token.</note>
     </example_1>
 </examples>
 
@@ -122,23 +126,11 @@ Please generate the JSON List now.
             required_keys = ["question", "solution", "answer"]
 
             for item in parsed_obj:
-                # 键校验
-                if not all(k in item for k in required_keys):
-                    return False
-                
-                # 类型校验
-                if not all(isinstance(item[k], str) for k in required_keys):
-                    return False
-
-                # 逻辑校验：Solution 和 Answer 必须是纯文本
-                if output_image_token in item["solution"]:
-                    # print("  [Reject] Solution contains image token.")
-                    return False
-                
-                if output_image_token in item["answer"]:
-                    # print("  [Reject] Answer contains image token.")
-                    return False
-
+                if not all(k in item for k in required_keys): return False
+                if not all(isinstance(item[k], str) for k in required_keys): return False
+                # Solution 和 Answer 必须是纯文本
+                if output_image_token in item["solution"]: return False
+                if output_image_token in item["answer"]: return False
                 item["contributor"] = contributor
                 item["image_placeholder"] = image_placeholder
                 item["reviewed"] = False
