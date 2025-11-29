@@ -519,10 +519,12 @@ async def _get_answer_raw_async(
             content = []
             seperated_texts = text.split(image_placeholder)
             for j in range(len(seperated_texts)):
-                content.append({
-                    "type": "text",
-                    "text": seperated_texts[j],
-                })
+                current_text_segment = seperated_texts[j]
+                if current_text_segment:
+                    content.append({
+                        "type": "text",
+                        "text": current_text_segment,
+                    })
                 if j == len(seperated_texts) - 1: break
                 current_image = images[image_index]
                 content.append({
