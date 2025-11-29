@@ -94,7 +94,7 @@ def with_tools_func_factory(
         hijacked_python_tool["implementation"] = hijacked_python_tool_implementation
         hijacked_mathematica_tool["implementation"] = hijacked_mathematica_tool_implementation
 
-        raw_response = await get_answer_async(
+        response = await get_answer_async(
             prompt = problem_text,
             model = lark_bot._config["workflows"]["with_tools"][model]["model"],
             system_prompt = HET_problem_system_prompt_with_tool,
@@ -111,9 +111,9 @@ def with_tools_func_factory(
             tool_use_trial_num = lark_bot._config["workflows"]["with_tools"][model]["tool_use_trial_num"],
         )
         
-        if raw_response:
-            response = await render_equation_async(
-                text = raw_response,
+        if response:
+            rendered_response = await render_equation_async(
+                text = response,
                 begin_of_equation = lark_bot.begin_of_equation,
                 end_of_equation = lark_bot.end_of_equation,
                 model = lark_bot._config["equation_rendering"]["model"],
@@ -123,10 +123,10 @@ def with_tools_func_factory(
                 trial_interval = lark_bot._config["equation_rendering"]["trial_interval"],
             )
         else:
-            response = f"由于内部原因，{model} 输出为空，建议您再试一次"
+            rendered_response = f"由于内部原因，{model} 输出为空，建议您再试一次"
         
         document_content = ""
-        document_content += response
+        document_content += rendered_response
         if len(tool_use_trials):
             document_content += (
                 f"{lark_bot.begin_of_forth_heading}"
@@ -146,8 +146,8 @@ def with_tools_func_factory(
         
         return {
             "document_content": document_content,
-            "raw_response": raw_response,
             "response": response,
+            "rendered_response": rendered_response,
             "tool_use_trials": tool_use_trials,
         }
     

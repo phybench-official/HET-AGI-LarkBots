@@ -1,7 +1,7 @@
 from library import *
 
 
-lazy_render = True
+lazy_render = False
 
 
 print("正在加载 HET bench 题目...")
@@ -18,14 +18,14 @@ model_to_api_setting_name = {
     "O4-mini": "O4-mini-for-HET-AGI",
     "Gemini-2.5-Pro": "Gemini-2.5-Pro-for-HET-AGI",
     "Gemini-2.5-Flash": "Gemini-2.5-Flash-for-HET-AGI",
-    "Grok-4.1-thinking": "Grok-4.1-thinking-for-HET-AGI",
+    # "Grok-4.1-thinking": "Grok-4.1-thinking-for-HET-AGI",
     "Grok-3": "Grok-3-for-HET-AGI",
     "Qwen-Max": "Qwen-Max-for-HET-AGI",
     "Qwen-Plus": "Qwen-Plus-for-HET-AGI",
     "Doubao-Seed-1.6-thinking": "Doubao-Seed-1.6-thinking-for-HET-AGI",
-    "Deepseek-R1": "Deepseek-R1-for-HET-AGI",
+    # "Deepseek-R1": "Deepseek-R1-for-HET-AGI",
     "Deepseek-V3": "Deepseek-V3-for-HET-AGI",
-    "GLM-4.5": "GLM-4.5-for-HET-AGI",
+    # "GLM-4.5": "GLM-4.5-for-HET-AGI",
     "Claude-Sonnet-4.5-thinking": "Claude-Sonnet-4.5-thinking-for-HET-AGI",
 }
 
@@ -36,9 +36,10 @@ tools = []
 visualize_answer_sheet_whitelist = [
     "Gemini-2.5-Pro",
     "GPT-5",
-    "Qwen-Max",
-    "Grok-4.1-thinking",
-    "Doubao-Seed-1.6-thinking",
+    # "Claude-Sonnet-4.5-thinking",
+    # "Grok-4.1-thinking",
+    # "Qwen-Max",
+    # "Doubao-Seed-1.6-thinking",
 ]
 
 
@@ -290,6 +291,11 @@ async def upload_model_answer_sheet(
 
 
 async def main():
+    
+    PKU_PHY_fermion_for_testing = PkuPhyFermionBot(
+        config_path = f"configs/pku_phy_fermion_config_for_testing.yaml",
+    )
+    PKU_PHY_fermion_for_testing.start()
 
     for model in model_to_api_setting_name:
         rollout_coroutines[model] = rollout_coroutine(model)
@@ -303,10 +309,6 @@ async def main():
     await asyncio.gather(*list(eval_coroutines.values()))
     print(f"所有模型的 eval 任务已完成！")
     
-    PKU_PHY_fermion_for_testing = PkuPhyFermionBot(
-        config_path = f"configs/pku_phy_fermion_config_for_testing.yaml",
-    )
-    PKU_PHY_fermion_for_testing.start()
     for model in model_to_api_setting_name:
         if model not in visualize_answer_sheet_whitelist:
             print(f"跳过模型 {model}，不整理其 Answer Sheet")
@@ -321,8 +323,7 @@ async def main():
                 checkpoint_threshold = 1,
             )
         except Exception:
-            print(f"上传 {model} Answer Sheet 出错啦！调用栈：\n{traceback.format_exc()}")     
-    PKU_PHY_fermion_for_testing.shutdown()
+            print(f"上传 {model} Answer Sheet 出错啦！调用栈：\n{traceback.format_exc()}")
     
     print("\n" + "="*40)
     print("HET Bench Leaderboard")
@@ -345,6 +346,8 @@ async def main():
     for rank, (model_name, score) in enumerate(leaderboard, 1):
         print(f"{rank:<5} | {model_name:<30} | {score:.1f}")
     print("="*40 + "\n")
+    
+    # PKU_PHY_fermion_for_testing.shutdown()
     
     print("Program OK.")
 

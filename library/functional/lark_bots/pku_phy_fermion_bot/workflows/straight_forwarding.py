@@ -37,7 +37,7 @@ def straight_forwarding_func_factory(
         else:
             problem_images = []
         
-        raw_response = await get_answer_async(
+        response = await get_answer_async(
             prompt = problem_text,
             model = lark_bot._config["workflows"]["straight_forwarding"][model]["model"],
             system_prompt = HET_problem_system_prompt,
@@ -49,9 +49,9 @@ def straight_forwarding_func_factory(
             trial_interval = lark_bot._config["workflows"]["straight_forwarding"][model]["trial_interval"],
         )
         
-        if raw_response:
-            response = await render_equation_async(
-                text = raw_response,
+        if response:
+            rendered_response = await render_equation_async(
+                text = response,
                 begin_of_equation = lark_bot.begin_of_equation,
                 end_of_equation = lark_bot.end_of_equation,
                 model = lark_bot._config["equation_rendering"]["model"],
@@ -61,11 +61,12 @@ def straight_forwarding_func_factory(
                 trial_interval = lark_bot._config["equation_rendering"]["trial_interval"],
             )
         else:
-            response = f"由于系统内部原因，{model} 输出为空，建议您再试一次"
+            rendered_response = f"由于系统内部原因，{model} 输出为空，建议您再试一次"
         
         return {
-            "document_content": response,
-            "raw_response": raw_response,
+            "document_content": rendered_response,
+            "response": response,
+            "rendered_response": rendered_response,
         }
     
     return workflow_func

@@ -3,6 +3,7 @@ from .equation_rendering import *
 from .problem_understanding import *
 from .workflows import *
 from ....fundamental.lark_tools._lark_sdk import P2ContactUserCreatedV3
+from ...HET_model_based_verifier import *
 
 
 __all__ = [
@@ -549,7 +550,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
                 }
                 context["trials"].append(trial_record)
                 # 按照工作流完成的时间顺序，把成功的工作流加到 trials 里并推送到飞书云文档中
-                await self._push_latest_trial_to_document(context)
+                await self._push_latest_trial_to_document(context, workflow_result)
                 
                 context["running_workflows"] -= 1
                 running_workflows = context["running_workflows"]
@@ -586,6 +587,7 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
     async def _push_latest_trial_to_document(
         self,
         context: Dict[str, Any],
+        workflow_result: Dict[str, Any],
     )-> None:
         
         """
@@ -601,6 +603,25 @@ class PkuPhyFermionBot(ParallelThreadLarkBot):
         content_str = ""
         content_str += f"{self.begin_of_third_heading}AI 解答 {trial_no} | {workflow_name}{self.end_of_third_heading}"
         content_str += document_content.strip()
+        
+        if "response" in workflow_result and context["answer"] != "暂无":
+            eval_result = await HET_model_verify(
+                problem = context["problem_text"],
+                answer = context["answer"],
+                response = workflow_result["response"],
+            )
+            content_str += self.begin_of_forth_heading
+            content_str += "AI 裁判员打分"
+            content_str += self.end_of_forth_heading
+            content_str += self.begin_of_fifth_heading
+            content_str += "分数"
+            content_str += self.end_of_fifth_heading
+            content_str += str(eval_result["score"]).strip()
+            content_str += self.begin_of_fifth_heading
+            content_str += "评分依据"
+            content_str += self.end_of_fifth_heading
+            content_str += eval_result["justification"].strip()
+        
         content_str += self.divider_placeholder
         
         blocks = self.build_document_blocks(content_str)
