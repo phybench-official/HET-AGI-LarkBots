@@ -198,7 +198,7 @@ async def main():
             print(f"  Rendering: {pdf_path}")
             task_indexers.append(pdf_path)
             task_inputs.append((
-                render_pdf_to_image_bytes(pdf_path, dpi=300.0),
+                render_pdf_to_image_bytes(pdf_path, dpi=600.0),
                 teacher_name,
             ))
     
