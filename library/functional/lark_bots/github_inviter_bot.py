@@ -15,7 +15,6 @@ __all__ = [
 ]
 
 _launch_time_stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-_MAPPING_FILE = "user_github_mapping.json"
 
 class GithubInviterBot(ParallelThreadLarkBot):
 
@@ -49,30 +48,13 @@ class GithubInviterBot(ParallelThreadLarkBot):
         self._github_base_url = "https://api.github.com"
         self._http_session: Optional[aiohttp.ClientSession] = None
         
-        # 加载用户绑定映射 (持久化)
-        self._user_mapping: Dict[str, str] = self._load_mapping()
+        # 纯内存存储用户绑定关系 (Feishu OpenID -> Github Username)
+        self._user_mapping: Dict[str, str] = {}
+        # 读写锁，确保并发安全
+        self._mapping_lock = asyncio.Lock()
         
         # 注册飞书新人入群/入租户事件
         self.register_user_created(self._handle_user_created_bridge)
-
-
-    def _load_mapping(self) -> Dict[str, str]:
-        if os.path.exists(_MAPPING_FILE):
-            try:
-                with open(_MAPPING_FILE, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception as e:
-                print(f"[GithubInviterBot] Load mapping failed: {e}")
-                return {}
-        return {}
-
-
-    def _save_mapping(self) -> None:
-        try:
-            with open(_MAPPING_FILE, "w", encoding="utf-8") as f:
-                json.dump(self._user_mapping, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print(f"[GithubInviterBot] Save mapping failed: {e}")
 
 
     async def _get_session(self)-> aiohttp.ClientSession:
@@ -121,7 +103,7 @@ class GithubInviterBot(ParallelThreadLarkBot):
             await self._handle_command(parsed_message)
         else:
             await self.reply_message_async(
-                response = "GithubInviter 仅接受指令操作。\n发送 /join_github <github_username> 申请加入组织，或 /help 查看帮助。",
+                response = "Magnus 仅接受指令操作。\n发送 /join_github <github_username> 申请加入组织，或 /help 查看帮助。",
                 message_id = message_id,
             )
 
@@ -164,11 +146,13 @@ class GithubInviterBot(ParallelThreadLarkBot):
         # === 基础指令 /me ===
         if command == "/me":
             role = "管理员 (Admin)" if is_admin else "普通用户 (User)"
-            # 查找已绑定的账号
+            
+            # 加锁读取绑定状态
+            bound_account = "未绑定"
             if sender_id:
-                bound_account = self._user_mapping.get(sender_id, "未绑定")
-            else:
-                bound_account = "未绑定"
+                async with self._mapping_lock:
+                    bound_account = self._user_mapping.get(sender_id, "未绑定")
+
             response_text = (
                 f"[用户档案]\n"
                 f"OpenID:   {sender_id}\n"
@@ -182,11 +166,10 @@ class GithubInviterBot(ParallelThreadLarkBot):
         elif command == "/you":
             org_name = self._config.get("github_org_name", "Unknown")
             response_text = (
-                f"[系统信息]\n"
+                f"[Magnus 系统信息]\n"
                 f"机器人ID: {self._config.get('open_id', 'Unknown')}\n"
                 f"服务组织: {org_name}\n"
                 f"启动时间: {_launch_time_stamp}\n"
-                f"当前进程: {os.getpid()}\n"
             )
             await self.reply_message_async(response_text, message_id)
             return
@@ -194,11 +177,12 @@ class GithubInviterBot(ParallelThreadLarkBot):
         # === 基础指令 /help ===
         elif command == "/help":
             help_text = (
-                "GithubInviter 指令列表：\n"
+                "Magnus 指令列表：\n"
                 "  /me                      查看个人档案\n"
                 "  /you                     查看机器人信息\n"
                 "  /join_github <username>  申请加入 GitHub 组织\n"
             )
+            # 仅管理员可见
             if is_admin:
                 help_text += (
                     "\n管理员指令：\n"
@@ -220,7 +204,7 @@ class GithubInviterBot(ParallelThreadLarkBot):
                 # 调用父类方法重载配置
                 new_config_content = await self._reload_config_async(target_path)
                 await self.reply_message_async(
-                    f"配置更新成功！\n读取路径: {self._config_path}", 
+                    f"Magnus 配置更新成功！\n读取路径: {self._config_path}", 
                     message_id
                 )
             except Exception as e:
@@ -235,16 +219,17 @@ class GithubInviterBot(ParallelThreadLarkBot):
             
             target_username = args[1]
             
-            # 唯一绑定检查
+            # 唯一绑定检查 (加锁读取)
             if sender_id:
-                if sender_id in self._user_mapping:
-                    bound_username = self._user_mapping[sender_id]
-                    if bound_username.lower() != target_username.lower():
-                        await self.reply_message_async(
-                            f"❌ 操作失败：您已绑定账号 '{bound_username}'。\n如需更换请联系管理员。", 
-                            message_id
-                        )
-                        return
+                async with self._mapping_lock:
+                    if sender_id in self._user_mapping:
+                        bound_username = self._user_mapping[sender_id]
+                        if bound_username.lower() != target_username.lower():
+                            await self.reply_message_async(
+                                f"❌ 操作失败：您已绑定账号 '{bound_username}'。\n如需更换请联系管理员。", 
+                                message_id
+                            )
+                            return
             
             invite_role = "admin" if is_admin else "direct_member"
             
@@ -257,7 +242,7 @@ class GithubInviterBot(ParallelThreadLarkBot):
             return
         
         else:
-            await self.reply_message_async(f"未知指令: {command}", message_id)
+            await self.reply_message_async(f"Magnus 未知指令: {command}", message_id)
 
 
     async def _invite_user_to_github(
@@ -273,7 +258,7 @@ class GithubInviterBot(ParallelThreadLarkBot):
         org_name = self._config.get("github_org_name")
         
         if not github_token or not org_name:
-            await self.reply_message_async("配置错误：缺少 github_token 或 github_org_name", message_id)
+            await self.reply_message_async("Magnus 配置错误：缺少 github_token 或 github_org_name", message_id)
             return
 
         headers = {
@@ -289,12 +274,13 @@ class GithubInviterBot(ParallelThreadLarkBot):
             async with session.get(user_url, headers=headers) as resp:
                 if resp.status != 200:
                     await self.reply_message_async(f"查找用户 '{username}' 失败，请确认拼写。", message_id)
+                    # 查找失败不绑定
                     return
                 user_data = await resp.json()
                 user_id = user_data.get("id")
         except Exception as e:
-            print(f"[GithubInviter] Network Error: {e}")
-            await self.reply_message_async("网络请求出错，请联系管理员。", message_id)
+            print(f"[Magnus] Network Error: {e}")
+            await self.reply_message_async("Magnus 网络请求出错，请联系管理员。", message_id)
             return
 
         if not user_id:
@@ -307,32 +293,38 @@ class GithubInviterBot(ParallelThreadLarkBot):
 
         try:
             async with session.post(invite_url, headers=headers, json=payload) as resp:
+                is_success = False
+                
                 if resp.status == 201:
                     role_display = "管理员" if role == "admin" else "成员"
                     await self.reply_message_async(
                         f"✅ 已向 {username} 发送 {role_display} 邀请。\n请检查 GitHub 注册邮箱。",
                         message_id
                     )
-                    # 成功后记录绑定
-                    if sender_id:
-                        self._user_mapping[sender_id] = username
-                        self._save_mapping()
+                    is_success = True
                         
                 elif resp.status == 422:
                     await self.reply_message_async(
                         "⚠️ 邀请未发送：用户已在组织中或有待处理邀请。",
                         message_id
                     )
-                    # 即使是 422，如果名字匹配，也可以视为绑定成功（补录）
-                    if sender_id and sender_id not in self._user_mapping:
-                        self._user_mapping[sender_id] = username
-                        self._save_mapping()
+                    # 422 意味着用户存在且关联有效，视为成功，允许绑定
+                    is_success = True
                 else:
                     error_text = await resp.text()
-                    print(f"[GithubInviter] Invite Failed: {resp.status} | {error_text}")
+                    print(f"[Magnus] Invite Failed: {resp.status} | {error_text}")
                     await self.reply_message_async(f"❌ 邀请失败 (Code: {resp.status})。请联系管理员。", message_id)
+                    is_success = False
+
+                # 3. 只有操作成功才绑定，防止输错用户名锁死
+                if is_success and sender_id:
+                    async with self._mapping_lock:
+                        if sender_id not in self._user_mapping:
+                            self._user_mapping[sender_id] = username
+                            print(f"[Magnus] Bound user {sender_id} to {username}")
+
         except Exception as e:
-            print(f"[GithubInviter] Network Error: {e}")
+            print(f"[Magnus] Network Error: {e}")
             await self.reply_message_async("网络请求出错，请联系管理员。", message_id)
 
 
@@ -361,13 +353,13 @@ class GithubInviterBot(ParallelThreadLarkBot):
             # 每次读取最新配置
             org_name = self._config.get("github_org_name", "该组织")
             
-            print(f"[GithubInviterBot] Detected new user: {user_id}")
+            print(f"[Magnus] Detected new user: {user_id}")
             
             welcome_text = (
                 f"欢迎加入 {org_name}！\n"
-                f"我是 GitHub 组织邀请助手。请直接回复指令：\n"
+                f"我是 Magnus Bot。回复指令：\n"
                 f"/join_github <您的GitHub用户名>\n"
-                f"我将自动为您发送 {org_name} GitHub 组织的加入邀请。"
+                f"我将邀请您加入 {org_name} GitHub 组织，邀请函会发至您的 Github 绑定邮箱。"
             )
             
             await self.send_message_async(
@@ -376,4 +368,4 @@ class GithubInviterBot(ParallelThreadLarkBot):
                 content = welcome_text,
             )
         except Exception as error:
-            print(f"[GithubInviterBot] Error in user welcome: {error}\n{traceback.format_exc()}")
+            print(f"[Magnus] Error in user welcome: {error}\n{traceback.format_exc()}")
