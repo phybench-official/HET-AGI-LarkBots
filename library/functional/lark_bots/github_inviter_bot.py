@@ -1,14 +1,10 @@
 from ...fundamental import *
-# from .workflows import *
-from ...fundamental.lark_tools._lark_sdk import P2ContactUserCreatedV3
 import aiohttp
+
 
 __all__ = [
     "GithubInviterBot",
 ]
-
-
-_launch_time_stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 class GithubInviterBot(ParallelThreadLarkBot):
@@ -50,6 +46,10 @@ class GithubInviterBot(ParallelThreadLarkBot):
         
         # 用于 HTTP 请求的 session，将在 lazy load 或首次使用时初始化
         self._http_session: Optional[aiohttp.ClientSession] = None
+        
+        # 用户映射缓存：Feishu OpenID -> Github Username
+        # 不考虑内存泄漏，无限增长
+        self._user_mapping: Dict[str, str] = {}
 
 
     async def _get_session(
@@ -110,7 +110,7 @@ class GithubInviterBot(ParallelThreadLarkBot):
         else:
             # 如果不是指令，提示用户
             await self.reply_message_async(
-                response = "GithubInviter 仅接受指令操作。\n发送 /join_github <github_username> 以邀请用户。",
+                response = "GithubInviter 仅接受指令操作。\n发送 /join_github <github_username> 申请加入组织。",
                 message_id = message_id,
             )
 
@@ -150,23 +150,47 @@ class GithubInviterBot(ParallelThreadLarkBot):
         command = args[0].lower()
 
         if command == "/join_github":
-            if not is_admin:
-                await self.reply_message_async("错误: 权限不足 (EACCES)", message_id)
-                return
-            
+            # 任何人都可以执行，但角色不同
             if len(args) < 2:
                 await self.reply_message_async("用法: /join_github <github_username>", message_id)
                 return
             
             target_username = args[1]
-            await self._invite_user_to_github(target_username, message_id)
+            
+            # 检查唯一绑定限制
+            # sender_id 即飞书用户的 open_id
+            if sender_id:
+                if sender_id in self._user_mapping:
+                    bound_username = self._user_mapping[sender_id]
+                    # 如果尝试绑定的账号与已绑定的不一致 (忽略大小写)
+                    if bound_username.lower() != target_username.lower():
+                        await self.reply_message_async(
+                            response = f"❌ 操作失败：您已绑定 GitHub 账号 '{bound_username}'，无法申请其他账号。\n如有疑问或需更换账号，请联系管理员。",
+                            message_id = message_id
+                        )
+                        return
+                    # 如果一致，允许重试 (pass)
+                else:
+                    # 首次绑定，记录映射
+                    self._user_mapping[sender_id] = target_username
+
+            # 逻辑：管理员邀请默认为 owner (admin)，普通用户邀请默认为 member (direct_member)
+            invite_role = "admin" if is_admin else "direct_member"
+            
+            await self._invite_user_to_github(
+                username = target_username, 
+                role = invite_role, 
+                message_id = message_id,
+                inviter_is_admin = is_admin
+            )
             return
 
         elif command == "/help":
             help_text = (
                 "GithubInviter 指令列表：\n"
-                "  /join_github <username>  邀请用户加入组织\n"
-                "  /help                    显示此帮助"
+                "  /join_github <username>  申请加入组织 (需前往 GitHub 邮箱确认)\n"
+                "  /help                    显示此帮助\n\n"
+                "说明：每位用户仅限绑定一个 GitHub 账号；普通用户申请将作为成员加入，管理员操作将作为 Owner 加入。"
             )
             await self.reply_message_async(help_text, message_id)
             return
@@ -178,7 +202,9 @@ class GithubInviterBot(ParallelThreadLarkBot):
     async def _invite_user_to_github(
         self,
         username: str,
+        role: str,
         message_id: str,
+        inviter_is_admin: bool,
     )-> None:
         
         try:
@@ -196,46 +222,65 @@ class GithubInviterBot(ParallelThreadLarkBot):
         session = await self._get_session()
         
         # 1. Resolve Username to ID
-        # GitHub API 邀请接口通常推荐使用 ID，虽然部分接口支持 email，但 username 需要转换
         user_url = f"{self._github_base_url}/users/{username}"
-        async with session.get(user_url, headers=headers) as resp:
-            if resp.status != 200:
-                error_msg = await resp.text()
-                await self.reply_message_async(
-                    response = f"查找用户 '{username}' 失败 (HTTP {resp.status})。\nGitHub 返回: {error_msg}",
-                    message_id = message_id,
-                )
-                return
-            user_data = await resp.json()
-            user_id = user_data.get("id")
+        
+        try:
+            async with session.get(user_url, headers=headers) as resp:
+                if resp.status != 200:
+                    # 内部打印日志方便 debug，但不透传给用户
+                    error_text = await resp.text()
+                    print(f"[GithubInviterBot] Get User Failed: {resp.status} | {error_text}")
+                    
+                    await self.reply_message_async(
+                        response = f"查找用户 '{username}' 失败。\n请确认 GitHub 用户名是否正确，如有疑问请联系管理员。",
+                        message_id = message_id,
+                    )
+                    return
+                user_data = await resp.json()
+                user_id = user_data.get("id")
+        except Exception as e:
+            print(f"[GithubInviterBot] Network Error (Get User): {e}")
+            await self.reply_message_async("网络请求出错，如有疑问请联系管理员。", message_id)
+            return
 
         if not user_id:
-            await self.reply_message_async(f"未找到用户 '{username}' 的 ID。", message_id)
+            await self.reply_message_async(f"未找到用户 '{username}' 的 ID，请确认拼写。", message_id)
             return
 
         # 2. Send Invitation
         invite_url = f"{self._github_base_url}/orgs/{org_name}/invitations"
+        
+        # GitHub API Role Enum: 'admin' (Owner), 'direct_member' (Member)
         payload = {
             "invitee_id": user_id,
-            "role": "direct_member", 
+            "role": role, 
         }
 
-        async with session.post(invite_url, headers=headers, json=payload) as resp:
-            if resp.status == 201:
-                await self.reply_message_async(
-                    response = f"✅ 成功邀请用户 {username} (ID: {user_id}) 加入组织 {org_name}。",
-                    message_id = message_id,
-                )
-            elif resp.status == 422:
-                # 常见错误：用户已经在组织中
-                raw_resp = await resp.text()
-                await self.reply_message_async(
-                    response = f"⚠️ 邀请失败：用户可能已在组织中或有待处理的邀请。\nGitHub 返回: {raw_resp}",
-                    message_id = message_id,
-                )
-            else:
-                error_msg = await resp.text()
-                await self.reply_message_async(
-                    response = f"❌ 邀请请求失败 (HTTP {resp.status})。\nGitHub 返回: {error_msg}",
-                    message_id = message_id,
-                )
+        try:
+            async with session.post(invite_url, headers=headers, json=payload) as resp:
+                if resp.status == 201:
+                    role_display = "管理员 (Owner)" if role == "admin" else "成员 (Member)"
+                    await self.reply_message_async(
+                        response = f"✅ 已向 {username} (ID: {user_id}) 发送 {role_display} 邀请。\n请检查您的 GitHub 注册邮箱或访问组织页面接受邀请。",
+                        message_id = message_id,
+                    )
+                elif resp.status == 422:
+                    # 422 通常意味着已经是成员或已邀请
+                    # 这种情况下不需要看日志，直接提示业务含义即可
+                    await self.reply_message_async(
+                        response = f"⚠️ 邀请未发送：该用户已经是组织成员，或已有一个待处理的邀请。\n如有疑问请联系管理员。",
+                        message_id = message_id,
+                    )
+                else:
+                    # 其他错误 (403/404/500 等)
+                    error_text = await resp.text()
+                    print(f"[GithubInviterBot] Invite Failed: {resp.status} | {error_text}")
+                    
+                    await self.reply_message_async(
+                        response = f"❌ 邀请请求失败 (Code: {resp.status})。\n如有疑问请联系管理员。",
+                        message_id = message_id,
+                    )
+        except Exception as e:
+            print(f"[GithubInviterBot] Network Error (Invite): {e}")
+            await self.reply_message_async("网络请求出错，如有疑问请联系管理员。", message_id)
+            return
