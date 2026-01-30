@@ -24,6 +24,7 @@ dependencies = [
     "pyarrow>=22.0.0",
     "pymupdf>=1.26.6",
     "weasyprint>=66.0",
+    "aiohttp>=3.13.3",
 ]
 
 [build-system]
