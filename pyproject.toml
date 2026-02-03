@@ -7,7 +7,7 @@ requires-python = ">=3.10"
 dependencies = [
     "aiofiles>=25.1.0",
     "fastmcp>=2.13.0",
-    "httpx>=0.28.1",
+    "httpx[socks]>=0.28.1",
     "lark-oapi>=1.0.0",
     "openai>=1.0.0",
     "python-dotenv>=1.2.1",
